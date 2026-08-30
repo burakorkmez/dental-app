@@ -70,3 +70,48 @@ If you are having trouble breathing or swallowing, your face or neck is swelling
 For a knocked-out tooth or a jaw injury, call the clinic immediately — these are time-sensitive.
 
 I am not able to assess an emergency, so please do not wait on this conversation.`;
+
+/** Shown when the model streams nothing usable back. */
+export const AI_FALLBACK_REPLY =
+  'Sorry, I could not answer that. Would you like to book an appointment instead?';
+
+type StreamChunk = { choices?: { delta?: { content?: string | null } }[] };
+
+/**
+ * Turns a chat-completion stream into a plain-text response body: raw deltas,
+ * no SSE framing, because the phone has no event-source parser and does not
+ * need one. `onDone` receives the assembled reply BEFORE the stream closes, so
+ * persistence cannot be lost to the response finishing first.
+ *
+ * A mid-stream failure keeps whatever already reached the patient rather than
+ * throwing away a half-written answer.
+ */
+export function replyStream(
+  chunks: AsyncIterable<StreamChunk>,
+  onDone: (reply: string) => Promise<unknown>
+): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    async start(controller) {
+      let reply = '';
+      try {
+        for await (const chunk of chunks) {
+          const delta = chunk.choices?.[0]?.delta?.content;
+          if (!delta) continue;
+          reply += delta;
+          controller.enqueue(encoder.encode(delta));
+        }
+      } catch (err) {
+        // Never echo the error: it can quote the prompt, and the prompt is
+        // patient-typed free text.
+        console.error('[ai] stream failed', err instanceof Error ? err.message : err);
+      }
+      if (!reply.trim()) {
+        reply = AI_FALLBACK_REPLY;
+        controller.enqueue(encoder.encode(reply));
+      }
+      await onDone(reply);
+      controller.close();
+    },
+  });
+}

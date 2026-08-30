@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import OpenAI from 'openai';
 
 import { db } from '@/db';
@@ -8,6 +8,7 @@ import {
   EMERGENCY_REPLY,
   externalTransmissionApproved,
   isEmergency,
+  replyStream,
   SYSTEM_PROMPT,
 } from '@/lib/ai';
 import { requireAuth } from '@/lib/auth';
@@ -91,35 +92,39 @@ export const POST = route(async (req: Request) => {
     ],
     max_tokens: 400,
     temperature: 0.3,
+    stream: true,
   });
 
-  const reply =
-    completion.choices[0]?.message?.content?.trim() ??
-    'Sorry, I could not answer that. Would you like to book an appointment instead?';
+  // The answer streams as it is generated. Every branch above this line stays
+  // JSON — emergencies and the 503s — so the client can tell the two apart by
+  // content type, and the conversation id rides in a header because a text
+  // body has nowhere to put it.
+  const stream = replyStream(completion, (reply) =>
+    db
+      .insert(aiMessages)
+      .values({ conversationId: conversation.id, role: 'assistant', content: reply })
+  );
 
-  const [saved] = await db
-    .insert(aiMessages)
-    .values({ conversationId: conversation.id, role: 'assistant', content: reply })
-    .returning();
-
-  return json({
-    conversationId: conversation.id,
-    emergency: false,
-    message: { id: saved.id, role: 'assistant', content: reply },
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Conversation-Id': conversation.id,
+    },
   });
 });
 
-/** Rehydrates a thread when the app restarts. */
-export const GET = route(async (req: Request) => {
+/** Rehydrates the thread when the app restarts. One thread per patient: the newest. */
+export const GET = route(async () => {
   const user = await requireAuth();
-  const conversationId = new URL(req.url).searchParams.get('conversationId');
-  if (!conversationId) return json({ conversationId: null, messages: [] });
 
   const [conversation] = await db
     .select()
     .from(aiConversations)
-    .where(and(eq(aiConversations.id, conversationId), eq(aiConversations.userId, user.id)));
-  if (!conversation) throw notFound('Conversation not found');
+    .where(eq(aiConversations.userId, user.id))
+    .orderBy(desc(aiConversations.createdAt))
+    .limit(1);
+  if (!conversation) return json({ conversationId: null, messages: [] });
 
   const messages = await db
     .select()
@@ -136,4 +141,11 @@ export const GET = route(async (req: Request) => {
       createdAt: m.createdAt.toISOString(),
     })),
   });
+});
+
+/** Clears the patient's history. The messages go with it — `on delete cascade`. */
+export const DELETE = route(async () => {
+  const user = await requireAuth();
+  await db.delete(aiConversations).where(eq(aiConversations.userId, user.id));
+  return json({ ok: true });
 });

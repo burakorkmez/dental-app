@@ -53,7 +53,7 @@ export default function Step2() {
   const [anxiety, setAnxiety] = useState(draft.anxiety);
 
   const onContinue = () => {
-    Object.assign(draft, { allergies, medications, smokes, pregnant, notes, anxiety });
+    Object.assign(draft, { allergies, medications, smokes, pregnant, notes, anxiety, medicalDone: true });
     router.push('/onboarding/step3');
   };
 

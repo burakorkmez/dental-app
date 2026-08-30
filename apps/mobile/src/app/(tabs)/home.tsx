@@ -2,9 +2,10 @@ import { Image } from 'expo-image';
 import { Redirect, router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { hasOnboarded } from '@/components/onboarding';
+import { useAvatar } from '@/components/ui';
+import { useApi, useMe, type Appointment } from '@/lib/api';
 
 const C = {
   page: '#EDF6FE',
@@ -31,8 +32,6 @@ const CARD_SHADOW = {
   shadowRadius: 16,
 } as const;
 
-const AVATAR = require('@/assets/images/av-alex.png');
-
 const ACTIONS = [
   { label: 'Book Appointment', href: '/booking/date' as const, img: require('@/assets/images/qa-book.png') },
   { label: 'Message Clinic', img: require('@/assets/images/qa-message.png') },
@@ -51,8 +50,22 @@ function Row({ icon, text }: { icon: SymbolViewProps['name']; text: string }) {
   );
 }
 
+const greeting = () => {
+  const h = new Date().getHours();
+  return h < 12 ? 'Good morning,' : h < 18 ? 'Good afternoon,' : 'Good evening,';
+};
+
 export default function Home() {
-  if (!hasOnboarded) return <Redirect href="/onboarding/step1" />;
+  const { me } = useMe();
+  const avatar = useAvatar();
+  // Across the whole family, soonest first — the API already ordered it.
+  const { data, loading } = useApi<{ appointments: Appointment[] }>(
+    me?.hasOnboarded ? '/api/appointments?scope=upcoming' : null
+  );
+
+  if (me && !me.hasOnboarded) return <Redirect href="/onboarding/step1" />;
+
+  const next = data?.appointments[0];
 
   return (
     <View collapsable={false} style={{ flex: 1, backgroundColor: C.page }}>
@@ -70,15 +83,15 @@ export default function Home() {
         <View className="flex-row items-center">
           <View className="flex-1">
             <Text className="text-[17px]" style={{ color: C.navy }}>
-              Good morning,
+              {greeting()}
             </Text>
             <Text className="mt-[2px] text-[30px] font-bold" style={{ color: C.navy }}>
-              Alex 👋
+              {me?.self?.firstName ?? 'there'} 👋
             </Text>
           </View>
           <SymbolView name="bell" size={27} tintColor={C.navy} style={{ marginRight: 22 }} />
           <Image
-            source={AVATAR}
+            source={avatar}
             style={{ width: 64, height: 64, borderRadius: 32 }}
             contentFit="cover"
           />
@@ -91,26 +104,49 @@ export default function Home() {
         >
           <Image
             source={require('@/assets/images/appt-tooth.png')}
-            style={{ position: 'absolute', right: -10, top: 40, width: 220, height: 220 }}
+            style={{ position: 'absolute', right: 8, top: 0, bottom: 0, width: 150 }}
             contentFit="contain"
           />
           <Text className="text-[18px] font-semibold" style={{ color: C.blue }}>
             Next Appointment
           </Text>
-          <View className="mt-[19px]">
-            <Row icon="calendar" text="Tue, May 14, 2024" />
-            <Row icon="clock" text="10:00 AM" />
-            <Row icon="person" text="Dr. Sarah Johnson" />
-            <Row icon="mouth" text="Teeth Cleaning" />
-          </View>
-          <Pressable
-            className="ml-auto mt-[4px] h-[38px] items-center justify-center rounded-[19px] px-[26px]"
-            style={{ borderWidth: 1.5, borderColor: '#7FD3EE', backgroundColor: '#F2FBFE' }}
-          >
-            <Text className="text-[17px]" style={{ color: C.blue }}>
-              View Details
-            </Text>
-          </Pressable>
+
+          {loading ? (
+            <ActivityIndicator style={{ marginVertical: 52 }} color={C.accent} />
+          ) : next ? (
+            <>
+              <View className="mt-[19px]">
+                <Row icon="calendar" text={next.dateLabel} />
+                <Row icon="clock" text={next.timeLabel} />
+                <Row icon="person" text={next.dentist?.displayName ?? 'The clinic'} />
+                <Row icon="mouth" text={next.service?.name ?? 'Appointment'} />
+              </View>
+              <Pressable
+                onPress={() => router.push(`/appointment/${next.id}`)}
+                className="ml-auto mt-[4px] h-[38px] items-center justify-center rounded-[19px] px-[26px]"
+                style={{ borderWidth: 1.5, borderColor: '#7FD3EE', backgroundColor: '#F2FBFE' }}
+              >
+                <Text className="text-[17px]" style={{ color: C.blue }}>
+                  View Details
+                </Text>
+              </Pressable>
+            </>
+          ) : (
+            <>
+              <Text className="mt-[16px] text-[17px] font-semibold" style={{ color: C.sub, lineHeight: 24 }}>
+                {'Nothing booked yet.\nPick a time that suits you.'}
+              </Text>
+              <Pressable
+                onPress={() => router.push('/booking/date')}
+                className="ml-auto mt-[18px] h-[38px] items-center justify-center rounded-[19px] px-[26px]"
+                style={{ borderWidth: 1.5, borderColor: '#7FD3EE', backgroundColor: '#F2FBFE' }}
+              >
+                <Text className="text-[17px] font-semibold" style={{ color: C.blue }}>
+                  Book now
+                </Text>
+              </Pressable>
+            </>
+          )}
         </View>
 
         {/* quick actions */}

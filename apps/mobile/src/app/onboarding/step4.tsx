@@ -3,19 +3,20 @@ import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   Chip,
   draft,
-  finishOnboarding,
   Label,
   PrimaryButton,
+  resetDraft,
   SHADOW,
   StepHeader,
   T,
 } from '@/components/onboarding';
+import { useApiClient, useMe, type Patient } from '@/lib/api';
 
 const TIMES = ['Morning', 'Afternoon', 'Evening'];
 // ponytail: tapping the row cycles the options — a real picker can wait.
@@ -23,14 +24,64 @@ const SOURCES = ['Friend / Family', 'Google search', 'Insurance', 'Instagram', '
 
 export default function Step4() {
   const insets = useSafeAreaInsets();
+  const call = useApiClient();
+  const { refresh } = useMe();
   const [time, setTime] = useState(draft.preferredTime);
   const [heardAbout, setHeardAbout] = useState(draft.heardAbout);
   const [extraNotes, setExtraNotes] = useState(draft.extraNotes);
+  const [saving, setSaving] = useState(false);
 
-  const onFinish = () => {
+  /**
+   * The whole draft lands here in two calls: the profile, then the medical
+   * history if step 2 was actually filled in. `refresh()` before navigating so
+   * home sees `hasOnboarded` and doesn't bounce straight back.
+   */
+  const onFinish = async () => {
+    if (saving) return;
     Object.assign(draft, { preferredTime: time, heardAbout, extraNotes });
-    finishOnboarding();
-    router.replace('/home');
+    setSaving(true);
+    try {
+      const { patient } = await call<{ patient: Patient }>('/api/patients', {
+        method: 'POST',
+        body: {
+          isSelf: true,
+          firstName: draft.firstName.trim(),
+          lastName: draft.lastName.trim(),
+          dateOfBirth: draft.dob || null,
+          phone: draft.phone.trim() || null,
+          gender: draft.gender,
+          primaryConcern:
+            draft.services.map((s) => s.name).join(', ').slice(0, 120) || null,
+          referralSource: draft.heardAbout,
+        },
+      });
+
+      if (draft.medicalDone) {
+        await call(`/api/patients/${patient.id}/medical-history`, {
+          method: 'PUT',
+          body: {
+            allergies: draft.allergies,
+            medications: draft.medications,
+            conditions: [],
+            isSmoker: draft.smokes,
+            isPregnant: draft.pregnant,
+            anxietyLevel: draft.anxiety,
+            notes: [draft.notes, draft.extraNotes].map((n) => n.trim()).filter(Boolean).join('\n\n') || null,
+          },
+        });
+      }
+
+      resetDraft();
+      await refresh();
+      router.replace('/home');
+    } catch (err) {
+      Alert.alert(
+        'Could not save your profile',
+        err instanceof Error ? err.message : 'Please try again.'
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -97,6 +148,7 @@ export default function Step4() {
             <TextInput
               value={extraNotes}
               onChangeText={setExtraNotes}
+              maxLength={500}
               multiline
               placeholder="Type here..."
               placeholderTextColor={T.placeholder}
@@ -117,7 +169,12 @@ export default function Step4() {
         </View>
 
         <View className="mt-[26px]">
-          <PrimaryButton label="Finish" arrow onPress={onFinish} />
+          <PrimaryButton
+            label={saving ? 'Saving…' : 'Finish'}
+            arrow
+            disabled={saving}
+            onPress={onFinish}
+          />
         </View>
       </ScrollView>
     </View>

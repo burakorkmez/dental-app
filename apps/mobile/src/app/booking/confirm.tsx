@@ -2,10 +2,12 @@ import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { ScrollView, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Alert, ScrollView, Text, View } from 'react-native';
 
-import { B, booking, formatDate, Header, SectionRow, SHADOW } from '@/components/booking';
-import { PrimaryButton, UI } from '@/components/ui';
+import { B, booking, formatDate, fromISODay, Header, SectionRow, SHADOW } from '@/components/booking';
+import { PrimaryButton, serviceArt, UI, useAvatar } from '@/components/ui';
+import { ApiError, useApiClient, type Appointment } from '@/lib/api';
 
 function DetailRow({
   icon,
@@ -45,6 +47,47 @@ function DetailRow({
 }
 
 export default function BookingConfirm() {
+  const call = useApiClient();
+  const avatar = useAvatar();
+  const [saving, setSaving] = useState(false);
+  const { patient, service, slot, dentistName } = booking;
+
+  /**
+   * `startsAt` is handed straight back from the slot the availability endpoint
+   * offered. The server re-runs the scheduling engine over it and the exclusion
+   * constraint settles any race — a 409 here means someone else got it first.
+   */
+  const confirm = async () => {
+    if (!patient || !service || !slot || saving) return;
+    setSaving(true);
+    try {
+      await call<{ appointment: Appointment }>('/api/appointments', {
+        method: 'POST',
+        body: {
+          patientId: patient.id,
+          serviceId: service.id,
+          dentistId: slot.dentistId,
+          startsAt: slot.startsAt,
+        },
+      });
+      booking.slot = null;
+      router.dismissTo('/home');
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'slot_taken') {
+        Alert.alert('That time just went', err.message, [
+          { text: 'Pick another', onPress: () => router.back() },
+        ]);
+      } else {
+        Alert.alert(
+          'Could not book',
+          err instanceof Error ? err.message : 'Please try again.'
+        );
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <View className="flex-1" style={{ backgroundColor: B.page }}>
       <StatusBar style="dark" />
@@ -64,7 +107,7 @@ export default function BookingConfirm() {
         >
           <View>
             <Image
-              source={require('@/assets/images/av-alex.png')}
+              source={patient?.isSelf ? avatar : require('@/assets/images/av-alex.png')}
               style={{ width: 76, height: 76, borderRadius: 38 }}
               contentFit="cover"
             />
@@ -74,10 +117,10 @@ export default function BookingConfirm() {
           </View>
           <View className="ml-[20px]">
             <Text className="text-[22px] font-semibold" style={{ color: B.title }}>
-              Alex
+              {patient ? `${patient.firstName} ${patient.lastName}` : '—'}
             </Text>
             <Text className="mt-[2px] text-[17px]" style={{ color: B.sub }}>
-              Me
+              {patient?.isSelf ? 'Me' : 'Family member'}
             </Text>
           </View>
         </View>
@@ -99,24 +142,29 @@ export default function BookingConfirm() {
               style={{ backgroundColor: '#EDF6FC' }}
             >
               <Image
-                source={require('@/assets/images/ic-tooth.png')}
+                source={serviceArt(service?.key)}
                 style={{ width: 38, height: 38 }}
                 contentFit="contain"
               />
             </View>
-            <View className="ml-[16px]">
+            <View className="ml-[16px] flex-1">
               <Text className="text-[22px] font-semibold" style={{ color: B.title }}>
-                {booking.reason}
+                {service?.name ?? '—'}
               </Text>
               <Text className="mt-[3px] text-[16px]" style={{ color: B.sub }}>
-                Regular professional cleaning
+                {service?.description ?? ''}
               </Text>
             </View>
           </View>
 
-          <DetailRow icon="calendar" label="Date" value={formatDate(booking.date)} />
-          <DetailRow icon="clock" label="Time" value={booking.time} suffix="(45 min)" />
-          <DetailRow icon="person" label="Dentist" value="Dr. Sarah Johnson" last />
+          <DetailRow icon="calendar" label="Date" value={formatDate(fromISODay(booking.day))} />
+          <DetailRow
+            icon="clock"
+            label="Time"
+            value={slot?.label ?? '—'}
+            suffix={service ? `(${service.durationMinutes} min)` : undefined}
+          />
+          <DetailRow icon="person" label="Dentist" value={dentistName || 'Our team'} last />
 
           <View
             className="mt-[8px] flex-row items-center rounded-[16px] px-[12px] py-[14px]"
@@ -130,7 +178,12 @@ export default function BookingConfirm() {
         </View>
 
         <View className="mt-[30px]">
-          <PrimaryButton label="Confirm Appointment" arrow onPress={() => router.dismissTo('/home')} />
+          <PrimaryButton
+            label={saving ? 'Booking…' : 'Confirm Appointment'}
+            arrow
+            disabled={saving || !slot}
+            onPress={confirm}
+          />
         </View>
       </ScrollView>
     </View>

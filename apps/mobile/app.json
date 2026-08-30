@@ -39,7 +39,15 @@
           "imageWidth": 76
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "@sentry/react-native",
+        {
+          "url": "https://sentry.io/",
+          "organization": "codesistency-gs",
+          "project": "dental-app-tutorial"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

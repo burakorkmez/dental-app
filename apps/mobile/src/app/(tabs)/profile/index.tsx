@@ -1,3 +1,4 @@
+import { useAuth } from '@clerk/expo';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, type Href } from 'expo-router';
@@ -6,7 +7,8 @@ import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Fragment, type ReactNode } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 
-import { AQUA_BODY } from '@/components/ui';
+import { AQUA_BODY, useAvatar } from '@/components/ui';
+import { useMe } from '@/lib/api';
 
 const C = {
   page: '#EEF5FA',
@@ -63,6 +65,11 @@ const MENU: { icon: ReactNode; label: string; href?: Href }[] = [
 ];
 
 export default function Profile() {
+  const { me } = useMe();
+  const avatar = useAvatar();
+  const { signOut } = useAuth();
+  const self = me?.self;
+
   return (
     <View collapsable={false} style={{ flex: 1, backgroundColor: C.page }}>
       <StatusBar style="dark" />
@@ -96,7 +103,7 @@ export default function Profile() {
               style={{ borderWidth: 1.5, borderColor: '#8FD9EC' }}
             />
             <Image
-              source={require('@/assets/images/av-alex.png')}
+              source={avatar}
               style={{ width: 96, height: 96, borderRadius: 48, transform: [{ scale: 1.12 }] }}
               contentFit="cover"
             />
@@ -120,14 +127,14 @@ export default function Profile() {
           </View>
 
           <View className="ml-[16px] mr-[72px] flex-1" style={{ marginTop: 10 }}>
-            <Text className="text-[19.5px] font-bold" style={{ color: C.navy }}>
-              Alex Johnson
+            <Text numberOfLines={1} className="text-[19.5px] font-bold" style={{ color: C.navy }}>
+              {self ? `${self.firstName} ${self.lastName}` : '—'}
             </Text>
             <Text numberOfLines={1} className="mt-[10px] text-[13.5px]" style={{ color: C.sub }}>
-              alex.johnson@email.com
+              {me?.email ?? ''}
             </Text>
             <Text className="mt-[9px] text-[15px]" style={{ color: C.teal }}>
-              +1 234 567 890
+              {self?.phone ?? 'No phone number'}
             </Text>
             <View
               className="mt-[11px] h-[28px] flex-row items-center self-start rounded-[14px] pl-[11px] pr-[15px]"
@@ -178,7 +185,10 @@ export default function Profile() {
         </Pressable>
 
         {/* sign out */}
-        <Pressable className="mt-[20px] flex-row items-center justify-center">
+        <Pressable
+          onPress={() => signOut()}
+          className="mt-[20px] flex-row items-center justify-center"
+        >
           <SymbolView
             name="rectangle.portrait.and.arrow.right"
             size={20}

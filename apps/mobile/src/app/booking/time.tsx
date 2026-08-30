@@ -2,23 +2,37 @@ import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SymbolView } from 'expo-symbols';
-import { useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
 
-import { B, booking, formatDate, Header, SHADOW } from '@/components/booking';
+import { B, booking, formatDate, fromISODay, Header, SHADOW } from '@/components/booking';
 import { Button, PrimaryButton, UI } from '@/components/ui';
-
-const SLOTS = [
-  '09:00 AM', '09:15 AM', '09:30 AM',
-  '09:45 AM', '10:00 AM', '10:15 AM',
-  '10:30 AM', '10:45 AM', '11:00 AM',
-  '11:15 AM', '11:30 AM', '11:45 AM',
-  '12:00 PM', '12:15 PM', '12:30 PM',
-];
-const TAKEN = ['10:00 AM', '11:15 AM', '11:30 AM', '11:45 AM'];
+import { useApi, type Dentist, type Slot } from '@/lib/api';
 
 export default function BookingTime() {
-  const [picked, setPicked] = useState(booking.time);
+  const service = booking.service;
+  const [picked, setPicked] = useState<Slot | null>(booking.slot);
+
+  const { data, loading, error } = useApi<{ slots: Slot[] }>(
+    service ? `/api/availability?serviceId=${service.id}&from=${booking.day}` : null
+  );
+  const { data: dentistData } = useApi<{ dentists: Dentist[] }>(
+    service ? `/api/dentists?serviceId=${service.id}` : null
+  );
+
+  /**
+   * Availability comes back aggregated across every dentist who offers the
+   * service, so the same wall-clock time can appear more than once. The patient
+   * picks a time; the first dentist free at it is the one they get.
+   */
+  const slots = useMemo(() => {
+    const byLabel = new Map<string, Slot>();
+    for (const s of data?.slots ?? []) if (!byLabel.has(s.label)) byLabel.set(s.label, s);
+    return [...byLabel.values()];
+  }, [data]);
+
+  const dentists = dentistData?.dentists ?? [];
+  const dentist = dentists.find((d) => d.id === picked?.dentistId) ?? dentists[0] ?? null;
 
   return (
     <View className="flex-1" style={{ backgroundColor: B.page }}>
@@ -35,26 +49,26 @@ export default function BookingTime() {
           style={[{ backgroundColor: B.card, borderWidth: 1, borderColor: B.border }, SHADOW]}
         >
           <Image
-            source={require('@/assets/images/av-doctor.png')}
+            source={
+              dentist?.photoUrl
+                ? { uri: dentist.photoUrl }
+                : require('@/assets/images/av-doctor.png')
+            }
             style={{ width: 76, height: 76, borderRadius: 38 }}
             contentFit="cover"
           />
           <View className="ml-[16px] flex-1">
             <Text className="text-[20px] font-semibold" style={{ color: B.title }}>
-              Dr. Sarah Johnson
+              {dentist?.displayName ?? 'Our team'}
             </Text>
             <Text className="mt-[3px] text-[16px]" style={{ color: B.sub }}>
-              Orthodontist
+              {dentist?.specialty ?? service?.name ?? ''}
             </Text>
-            <View className="mt-[4px] flex-row items-center">
-              <SymbolView name="star.fill" size={15} tintColor="#F5B301" />
-              <Text className="ml-[5px] text-[15px] font-semibold" style={{ color: B.navy }}>
-                4.9
+            {dentist?.title ? (
+              <Text className="mt-[4px] text-[15px]" style={{ color: B.navy }}>
+                {dentist.title}
               </Text>
-              <Text className="ml-[4px] text-[15px]" style={{ color: B.sub }}>
-                (320 reviews)
-              </Text>
-            </View>
+            ) : null}
           </View>
           <View
             className="h-[44px] w-[44px] items-center justify-center rounded-[14px]"
@@ -71,7 +85,7 @@ export default function BookingTime() {
         >
           <SymbolView name="calendar" size={26} tintColor={B.link} />
           <Text className="ml-[14px] flex-1 text-[18px]" style={{ color: B.navy }}>
-            {formatDate(booking.date)}
+            {formatDate(fromISODay(booking.day))}
           </Text>
         </View>
 
@@ -81,45 +95,56 @@ export default function BookingTime() {
           <Text className="ml-[8px] text-[15px]" style={{ color: B.navy }}>
             Available
           </Text>
-          <View
-            className="ml-[22px] h-[10px] w-[10px] rounded-full"
-            style={{ backgroundColor: '#C9D8E5' }}
-          />
-          <Text className="ml-[8px] text-[15px]" style={{ color: B.muted }}>
-            Unavailable
-          </Text>
+          {service ? (
+            <Text className="ml-auto text-[15px]" style={{ color: B.sub }}>
+              {service.durationMinutes} min
+            </Text>
+          ) : null}
         </View>
 
         {/* slots */}
-        <View className="mt-[16px] flex-row flex-wrap" style={{ gap: 10 }}>
-          {SLOTS.map((t) => {
-            const off = TAKEN.includes(t);
-            const on = picked === t;
-            return (
-              <Button
-                key={t}
-                label={t}
-                variant={on ? 'primary' : 'glass'}
-                check={on}
-                disabled={off}
-                height={62}
-                radius={18}
-                paddingX={0}
-                textSize={17}
-                checkSize={22}
-                onPress={() => setPicked(t)}
-                style={{ width: '31.4%' }}
-              />
-            );
-          })}
-        </View>
+        {loading ? (
+          <ActivityIndicator style={{ marginTop: 44 }} color={UI.aquaInk} />
+        ) : error ? (
+          <Text className="mt-[36px] text-center text-[16px]" style={{ color: '#D2405B' }}>
+            {error}
+          </Text>
+        ) : slots.length === 0 ? (
+          <Text className="mt-[36px] text-center text-[16px]" style={{ color: B.sub, lineHeight: 24 }}>
+            {'No times left on this day.\nGo back and try another date.'}
+          </Text>
+        ) : (
+          <View className="mt-[16px] flex-row flex-wrap" style={{ gap: 10 }}>
+            {slots.map((s) => {
+              const on = picked?.startsAt === s.startsAt;
+              return (
+                <Button
+                  key={s.startsAt}
+                  label={s.label}
+                  variant={on ? 'primary' : 'glass'}
+                  check={on}
+                  height={62}
+                  radius={18}
+                  paddingX={0}
+                  textSize={17}
+                  checkSize={22}
+                  onPress={() => setPicked(s)}
+                  style={{ width: '31.4%' }}
+                />
+              );
+            })}
+          </View>
+        )}
 
         <View className="mt-[30px]">
           <PrimaryButton
             label="Continue"
             arrow
+            disabled={!picked}
             onPress={() => {
-              booking.time = picked;
+              booking.slot = picked;
+              booking.dentistName =
+                dentists.find((d) => d.id === picked?.dentistId)?.displayName ?? '';
               router.push('/booking/confirm');
             }}
           />

@@ -3,8 +3,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -17,13 +18,15 @@ import {
 } from 'react-native';
 
 import { Button, SHADOW_GLASS, UI } from '@/components/ui';
+import { useApiClient, useApiStream } from '@/lib/api';
 
 /**
  * AI Dental Assistant — design/ai-assistant-design-1.png (empty) and -2.png (chat).
  *
- * Education and triage only: the replies below are canned copy that ships with
- * the app. No patient record and no message ever leaves the device from here —
- * see the non-negotiables in CLAUDE.md.
+ * Education and triage only. Replies come from `POST /api/ai/chat`, which owns
+ * the whole policy: the emergency card is matched server-side BEFORE any model
+ * call, no patient record is ever attached, and the outbound call is gated on
+ * an explicit deployment approval. This screen renders what it is handed.
  */
 
 // screen-local surfaces only; every button comes from '@/components/ui'
@@ -56,39 +59,28 @@ const CHIPS: { label: string; sf?: SymbolViewProps['name']; img?: number }[] = [
 type Msg = {
   from: 'me' | 'ai';
   time: string;
-  text?: string;
-  paras?: string[];
-  bullets?: string[];
-  link?: string;
+  /** Blank-line-separated paragraphs — the prompt asks for two at most. */
+  paras: string[];
 };
 
-type Reply = Omit<Msg, 'from' | 'time'>;
+/**
+ * Module-level so backing out of the screen and returning keeps the thread
+ * without a refetch. Across app restarts the server is the source of truth:
+ * `GET /api/ai/chat` hands back the newest conversation and its messages.
+ */
+let conversationId: string | null = null;
 
-const REPLIES: Record<string, Reply> = {
-  'Tooth sensitivity': {
-    paras: [
-      'Tooth sensitivity with cold drinks is quite common and can happen for a few reasons:',
-      'You can try using a desensitizing toothpaste and avoid very cold foods or drinks for a while.',
-    ],
-    bullets: [
-      'Enamel wear from brushing too hard or acidic foods',
-      'Gum recession that exposes the root surface',
-      'Recent teeth whitening treatments',
-    ],
-    link: 'If it keeps happening, book a check-up.',
-  },
-};
+type StoredMsg = { role: 'user' | 'assistant'; content: string; createdAt: string };
 
-const GENERIC: Reply = {
-  paras: [
-    'Thanks for asking. General guidance only: brush twice a day for two minutes, clean between your teeth daily, and keep sugary drinks to mealtimes.',
-    'I can point you at the basics, but I cannot examine you or make a diagnosis.',
-  ],
-  link: 'If something hurts or looks unusual, book a check-up.',
-};
+const now = (d = new Date()) =>
+  d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
-const now = () =>
-  new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+/** Paragraphs are stored as the model wrote them — blank-line separated. */
+const toMsg = (m: StoredMsg): Msg => ({
+  from: m.role === 'user' ? 'me' : 'ai',
+  time: now(new Date(m.createdAt)),
+  paras: m.content.split(/\n{2,}/).filter(Boolean),
+});
 
 function Card({
   children,
@@ -178,7 +170,7 @@ function MeBubble({ m }: { m: Msg }) {
         ]}
       >
         <Text className="text-[13px]" style={{ color: A.body, lineHeight: 19 }}>
-          {m.text}
+          {m.paras.join('\n\n')}
         </Text>
         <View className="mt-[6px] flex-row items-center justify-end">
           <Text className="mr-[7px] text-[12.5px]" style={{ color: '#5E93B5' }}>
@@ -197,7 +189,7 @@ function MeBubble({ m }: { m: Msg }) {
   );
 }
 
-function AiBubble({ m }: { m: Msg }) {
+function AiBubble({ m, streaming }: { m: Msg; streaming?: boolean }) {
   return (
     <View className="mb-[20px] flex-row items-start">
       <View
@@ -224,72 +216,107 @@ function AiBubble({ m }: { m: Msg }) {
         radius={20}
         style={{ flexShrink: 1, maxWidth: 257, paddingHorizontal: 15, paddingVertical: 14 }}
       >
-        {m.paras?.slice(0, 1).map((p) => (
-          <Text key={p} className="text-[13px]" style={{ color: A.body, lineHeight: 19 }}>
-            {p}
-          </Text>
-        ))}
-        {m.bullets ? (
-          <View className="mt-[10px]">
-            {m.bullets.map((b) => (
-              <View key={b} className="mb-[4px] flex-row pl-[6px]">
-                <View
-                  style={{
-                    width: 7,
-                    height: 7,
-                    borderRadius: 4,
-                    backgroundColor: A.bullet,
-                    marginTop: 7,
-                    marginRight: 11,
-                  }}
-                />
-                <Text
-                  className="flex-1 text-[13px]"
-                  style={{ color: A.body, lineHeight: 19 }}
-                >
-                  {b}
-                </Text>
-              </View>
-            ))}
-          </View>
-        ) : null}
-        {m.paras?.slice(1).map((p) => (
+        {(m.paras.length ? m.paras : ['']).map((p, i, all) => (
           <Text
-            key={p}
-            className="mt-[10px] text-[13px]"
-            style={{ color: A.body, lineHeight: 19 }}
+            key={i}
+            className="text-[13px]"
+            style={{ color: A.body, lineHeight: 19, marginTop: i === 0 ? 0 : 10 }}
           >
             {p}
+            {/* Caret sits on the last line, so the answer grows in front of it. */}
+            {streaming && i === all.length - 1 ? (
+              <Text style={{ color: A.blue }}>▍</Text>
+            ) : null}
           </Text>
         ))}
-        {m.link ? (
-          <Text className="mt-[8px] text-[13px]" style={{ color: A.blue, lineHeight: 19 }}>
-            {m.link}
+        {/* A timestamp on a half-written answer is a lie — it lands when it lands. */}
+        {streaming ? null : (
+          <Text className="mt-[10px] text-[12.5px]" style={{ color: A.time }}>
+            {m.time}
           </Text>
-        ) : null}
-        <Text className="mt-[10px] text-[12.5px]" style={{ color: A.time }}>
-          {m.time}
-        </Text>
+        )}
       </Card>
     </View>
   );
 }
 
 export default function Assistant() {
+  const stream = useApiStream();
+  const call = useApiClient();
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [text, setText] = useState('');
+  const [pending, setPending] = useState(false);
   const scroll = useRef<ScrollView>(null);
   const chatting = msgs.length > 0;
 
-  const send = (q: string) => {
+  // Load once per mount, not on every focus: a refetch mid-stream would fight
+  // the bubble being written. A failure just leaves the empty state up.
+  useEffect(() => {
+    call<{ conversationId: string | null; messages: StoredMsg[] }>('/api/ai/chat')
+      .then((h) => {
+        conversationId = h.conversationId;
+        setMsgs(h.messages.map(toMsg));
+      })
+      .catch(() => {});
+  }, [call]);
+
+  /** Server first — clearing the screen on a failed delete would be a lie. */
+  const clearHistory = () =>
+    call('/api/ai/chat', { method: 'DELETE' })
+      .then(() => {
+        conversationId = null;
+        setMsgs([]);
+      })
+      .catch((err) =>
+        Alert.alert('Could not delete', err instanceof Error ? err.message : 'Try again.')
+      );
+
+  const confirmClear = () =>
+    Alert.alert(
+      'Delete chat history?',
+      'This permanently deletes your conversation with the assistant.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: clearHistory },
+      ]
+    );
+
+  /** Rewrites the trailing AI bubble — the one this turn is filling in. */
+  const setReply = (content: string) =>
+    setMsgs((m) => [
+      ...m.slice(0, -1),
+      { ...m[m.length - 1], paras: content.split(/\n{2,}/).filter(Boolean) },
+    ]);
+
+  /**
+   * The reply is whatever the API returns — including its 503s, which carry
+   * copy worth showing ("the assistant is unavailable in this environment").
+   * An alert would hide that behind a dialog the patient has to dismiss.
+   *
+   * The empty AI bubble goes up with the question so the answer has somewhere
+   * to stream into; until the first token lands it shows a spinner.
+   */
+  const send = async (q: string) => {
     const t = q.trim();
-    if (!t) return;
+    if (!t || pending) return;
     setText('');
     setMsgs((m) => [
       ...m,
-      { from: 'me', text: t, time: now() },
-      { from: 'ai', time: now(), ...(REPLIES[t] ?? GENERIC) },
+      { from: 'me', paras: [t], time: now() },
+      { from: 'ai', paras: [], time: now() },
     ]);
+    setPending(true);
+    try {
+      conversationId = await stream(
+        '/api/ai/chat',
+        { conversationId: conversationId ?? undefined, message: t },
+        setReply
+      );
+    } catch (err) {
+      setReply(err instanceof Error ? err.message : 'Something went wrong.');
+    } finally {
+      setPending(false);
+    }
   };
 
   return (
@@ -314,21 +341,31 @@ export default function Assistant() {
               AI Dental Assistant
             </Text>
           </View>
-          <IconButton sf="ellipsis" />
+          {/* Nothing to delete on the empty state — the spacer keeps the title centred. */}
+          {chatting ? (
+            <IconButton sf="trash" onPress={confirmClear} />
+          ) : (
+            <View style={{ width: 42 }} />
+          )}
         </View>
 
         <ScrollView
           ref={scroll}
           contentContainerStyle={{ paddingHorizontal: 28, paddingTop: 22, paddingBottom: chatting ? 12 : 0 }}
           showsVerticalScrollIndicator={false}
-          onContentSizeChange={() => chatting && scroll.current?.scrollToEnd({ animated: true })}
+          // Not animated while a reply streams: one animation per token stutters.
+          onContentSizeChange={() => chatting && scroll.current?.scrollToEnd({ animated: !pending })}
         >
           <Disclaimer />
 
           {chatting ? (
             <View className="mt-[24px]">
               {msgs.map((m, i) =>
-                m.from === 'me' ? <MeBubble key={i} m={m} /> : <AiBubble key={i} m={m} />,
+                m.from === 'me' ? (
+                  <MeBubble key={i} m={m} />
+                ) : (
+                  <AiBubble key={i} m={m} streaming={pending && i === msgs.length - 1} />
+                ),
               )}
             </View>
           ) : (
@@ -430,18 +467,21 @@ export default function Assistant() {
           >
             <TextInput
               className="flex-1"
-              placeholder="Ask anything about your dental health..."
+              // Short enough to fit one line at both sizes, down to a 375pt
+              // screen: the placeholder has no room to wrap or ellipsize — a
+              // multiline input is only as tall as its value, which is empty.
+              placeholder="Ask a dental question"
               placeholderTextColor={A.muted}
               value={text}
               onChangeText={setText}
               onSubmitEditing={() => send(text)}
+              editable={!pending}
               returnKeyType="send"
               multiline={!chatting}
               style={{
                 fontSize: chatting ? 16 : 18,
                 color: A.body,
-                lineHeight: 26,
-                paddingVertical: 12,
+                paddingVertical: 0,
                 marginRight: 8,
               }}
             />
@@ -457,6 +497,7 @@ export default function Assistant() {
                   tintColor="#FFFFFF"
                 />
               }
+              disabled={pending}
               style={{ width: chatting ? 46 : 52 }}
               onPress={() => send(text)}
             />

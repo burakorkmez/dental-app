@@ -4,24 +4,17 @@ import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SymbolView } from 'expo-symbols';
 import { useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 
-import { B, booking, Header, SectionRow, SHADOW } from '@/components/booking';
+import { B, booking, fromISODay, Header, SectionRow, SHADOW, toISODay } from '@/components/booking';
 import { AQUA_BODY, GLASS_BODY, PrimaryButton, SHADOW_GLASS, UI } from '@/components/ui';
+import { useApi, useMe, type FamilyMember, type Service } from '@/lib/api';
 
-const PEOPLE = [
-  { name: 'Alex', img: require('@/assets/images/av-alex.png') },
-  { name: 'Emma', img: require('@/assets/images/av-emma.png') },
-  { name: 'Noah', img: require('@/assets/images/av-noah.png') },
-];
-
-const REASONS = [
-  'Checkup',
-  'Cleaning',
-  'Tooth pain',
-  'Whitening',
-  'Orthodontic consultation',
-  'Restorative',
+// No patient photos in v1 — the family list gets stock avatars by position.
+const AVATARS = [
+  require('@/assets/images/av-alex.png'),
+  require('@/assets/images/av-emma.png'),
+  require('@/assets/images/av-noah.png'),
 ];
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -29,13 +22,20 @@ const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 
 export default function BookingDate() {
-  const [who, setWho] = useState(booking.who);
-  const [reason, setReason] = useState(booking.reason);
+  const { me } = useMe();
+  const { data, loading } = useApi<{ services: Service[] }>('/api/services');
+  const services = data?.services ?? [];
+
+  const family: FamilyMember[] = me?.family ?? [];
+  const [patient, setPatient] = useState<FamilyMember | null>(
+    booking.patient ?? family.find((p) => p.isSelf) ?? null
+  );
+  const [service, setService] = useState<Service | null>(booking.service);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [monthOffset, setMonthOffset] = useState(0);
 
   const today = useMemo(() => startOfDay(new Date()), []);
-  const [picked, setPicked] = useState<Date>(today);
+  const [picked, setPicked] = useState<Date>(fromISODay(booking.day));
 
   const view = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1);
   const year = view.getFullYear();
@@ -49,6 +49,10 @@ export default function BookingDate() {
       ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
     ];
   }, [year, month]);
+
+  // The family list arrives with `me`, so the default self-selection can only
+  // be made once it has.
+  const selected = patient ?? family.find((p) => p.isSelf) ?? null;
 
   return (
     <View className="flex-1" style={{ backgroundColor: B.page }}>
@@ -64,35 +68,38 @@ export default function BookingDate() {
         </View>
 
         <View className="mt-[14px] flex-row" style={{ gap: 10 }}>
-          {PEOPLE.map((p, i) => (
-            <Pressable
-              key={p.name}
-              onPress={() => setWho(i)}
-              className="flex-1 items-center rounded-[20px] pb-[12px] pt-[14px]"
-              style={[
-                {
-                  backgroundColor: B.card,
-                  borderWidth: who === i ? 1.5 : 1,
-                  borderColor: who === i ? '#4FC3E8' : B.border,
-                },
-                SHADOW,
-              ]}
-            >
-              <Image
-                source={p.img}
-                style={{ width: 64, height: 64, borderRadius: 14 }}
-                contentFit="cover"
-              />
-              <Text className="mt-[8px] text-[15px]" style={{ color: B.navy }}>
-                {p.name}
-              </Text>
-              {who === i ? (
-                <View className="absolute left-[-6px] top-[-6px]">
-                  <SymbolView name="checkmark.circle.fill" size={26} tintColor={UI.aquaInk} />
-                </View>
-              ) : null}
-            </Pressable>
-          ))}
+          {family.map((p, i) => {
+            const on = selected?.id === p.id;
+            return (
+              <Pressable
+                key={p.id}
+                onPress={() => setPatient(p)}
+                className="flex-1 items-center rounded-[20px] pb-[12px] pt-[14px]"
+                style={[
+                  {
+                    backgroundColor: B.card,
+                    borderWidth: on ? 1.5 : 1,
+                    borderColor: on ? '#4FC3E8' : B.border,
+                  },
+                  SHADOW,
+                ]}
+              >
+                <Image
+                  source={AVATARS[i % AVATARS.length]}
+                  style={{ width: 64, height: 64, borderRadius: 14 }}
+                  contentFit="cover"
+                />
+                <Text numberOfLines={1} className="mt-[8px] text-[15px]" style={{ color: B.navy }}>
+                  {p.firstName}
+                </Text>
+                {on ? (
+                  <View className="absolute left-[-6px] top-[-6px]">
+                    <SymbolView name="checkmark.circle.fill" size={26} tintColor={UI.aquaInk} />
+                  </View>
+                ) : null}
+              </Pressable>
+            );
+          })}
           <View
             className="flex-1 items-center justify-center rounded-[20px] pb-[12px] pt-[14px]"
             style={[{ backgroundColor: B.card, borderWidth: 1, borderColor: B.border }, SHADOW]}
@@ -109,7 +116,7 @@ export default function BookingDate() {
         <Text className="mt-[20px] text-[18px] font-semibold" style={{ color: B.title }}>
           Select reason
         </Text>
-        <Pressable onPress={() => setPickerOpen(true)} style={SHADOW_GLASS}>
+        <Pressable onPress={() => setPickerOpen(true)} disabled={loading} style={SHADOW_GLASS}>
           <LinearGradient
             colors={GLASS_BODY}
             start={{ x: 0.5, y: 0 }}
@@ -132,8 +139,11 @@ export default function BookingDate() {
               style={{ width: 34, height: 34 }}
               contentFit="contain"
             />
-            <Text className="ml-[16px] flex-1 text-[18px]" style={{ color: B.navy }}>
-              {reason}
+            <Text
+              className="ml-[16px] flex-1 text-[18px]"
+              style={{ color: service ? B.navy : B.muted }}
+            >
+              {service?.name ?? (loading ? 'Loading…' : 'Choose a reason')}
             </Text>
             <SymbolView name="chevron.down" size={20} tintColor={B.navy} />
           </LinearGradient>
@@ -217,8 +227,16 @@ export default function BookingDate() {
           <PrimaryButton
             label="Continue"
             arrow
+            disabled={!selected || !service}
             onPress={() => {
-              Object.assign(booking, { who, reason, date: picked });
+              // A new day invalidates whatever slot was chosen before.
+              Object.assign(booking, {
+                patient: selected,
+                service,
+                day: toISODay(picked),
+                slot: null,
+                dentistName: '',
+              });
               router.push('/booking/time');
             }}
           />
@@ -238,22 +256,26 @@ export default function BookingDate() {
             <Text className="mb-[8px] text-[18px] font-semibold" style={{ color: B.title }}>
               Select reason
             </Text>
-            {REASONS.map((r) => (
+            {loading ? <ActivityIndicator color={UI.aquaInk} /> : null}
+            {services.map((s) => (
               <Pressable
-                key={r}
+                key={s.id}
                 onPress={() => {
-                  setReason(r);
+                  setService(s);
                   setPickerOpen(false);
                 }}
                 className="h-[54px] flex-row items-center"
               >
                 <Text
                   className="flex-1 text-[17px]"
-                  style={{ color: r === reason ? UI.aquaInk : B.navy }}
+                  style={{ color: s.id === service?.id ? UI.aquaInk : B.navy }}
                 >
-                  {r}
+                  {s.name}
                 </Text>
-                {r === reason ? (
+                <Text className="mr-[12px] text-[15px]" style={{ color: B.sub }}>
+                  {s.durationMinutes} min
+                </Text>
+                {s.id === service?.id ? (
                   <SymbolView name="checkmark" size={19} tintColor={UI.aquaInk} />
                 ) : null}
               </Pressable>

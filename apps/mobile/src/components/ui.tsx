@@ -1,3 +1,4 @@
+import { useUser } from '@clerk/expo';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
@@ -354,4 +355,32 @@ export function Card({ children, style }: { children: ReactNode; style?: StylePr
       {children}
     </View>
   );
+}
+
+/**
+ * Artwork per service `key` (the stable keys in the services table). Used by
+ * the booking picker, the appointment cards and onboarding step 3, so it lives
+ * here rather than being re-declared per screen.
+ */
+export const SERVICE_ART: Record<string, number> = {
+  checkup: require('@/assets/images/svc-checkup.png'),
+  cleaning: require('@/assets/images/svc-cleaning.png'),
+  pain: require('@/assets/images/svc-toothpain.png'),
+  white: require('@/assets/images/svc-whitening.png'),
+  ortho: require('@/assets/images/svc-ortho.png'),
+  resto: require('@/assets/images/svc-restorative.png'),
+  followup: require('@/assets/images/appt-checkup.png'),
+};
+
+export const serviceArt = (key: string | undefined): number =>
+  (key && SERVICE_ART[key]) || require('@/assets/images/ic-tooth.png');
+
+/**
+ * The signed-in user's own photo, straight from Clerk. Clerk always serves an
+ * imageUrl — a generated initials avatar when nobody uploaded one — so the
+ * bundled asset is only the signed-out / not-loaded case.
+ */
+export function useAvatar() {
+  const { user } = useUser();
+  return user?.imageUrl ? { uri: user.imageUrl } : require('@/assets/images/av-alex.png');
 }

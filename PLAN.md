@@ -178,7 +178,7 @@ hits Drizzle directly, no HTTP hop.
 | **Stream** | Video/audio calls + chat messages and their storage | `@stream-io/video-react-native-sdk` 1.45.0, `stream-chat-expo` 9.8.2 |
 | **ImageKit** | Image storage, transforms, CDN | `imagekit` 6.0.0 |
 | **OpenAI** | AI assistant completions | `openai` 7.8.0, model `gpt-4o-mini` |
-| **Sentry** | Error monitoring, both apps | `@sentry/react-native` 8.24.0, `@sentry/nextjs` 10.72.0 |
+| **Sentry** | Error monitoring, both apps | `@sentry/react-native` 7.11.0 (the version Expo SDK 57 pins — not npm-latest 8.24.0), `@sentry/nextjs` 10.72.0 |
 | **Expo / EAS** | Mobile runtime, builds, push delivery | `expo` 57.0.18, `expo-router` 57.0.17 |
 | **Vercel** | Web hosting, API, cron | `next` 16.3.3 |
 
@@ -296,10 +296,12 @@ it's the kind of thing that eats an afternoon.
 Phases are ordered so that something is demoable early and the risky part (scheduling)
 lands before everything that depends on it.
 
-### Phase 0 — Foundation ✅ (except `packages/shared`, see D1; Sentry not wired)
+### Phase 0 — Foundation ✅ (except `packages/shared`, see D1; Sentry wired in mobile only)
 - npm workspace: `apps/mobile`, `apps/web`, `packages/shared`.
 - `apps/web`: Next.js 16.3.3 App Router, Drizzle 0.45.2 + Neon, Sentry.
-- `apps/mobile`: Expo 57 + expo-router 57, Sentry.
+- `apps/mobile`: Expo 57 + expo-router 57, Sentry (`Sentry.init` in `src/app/_layout.tsx`
+  with `sendDefaultPii: false`, console breadcrumbs dropped, `event.user` reduced to the
+  Clerk id; source maps via the `@sentry/react-native` config plugin + `SENTRY_AUTH_TOKEN`).
 - `.env.example` in both apps listing every key. Nothing hardcoded.
 - **`PLAN.md` written to the project root**, carrying this spec forward for future sessions.
 
@@ -326,7 +328,7 @@ lands before everything that depends on it.
 - Shared `requireAuth()` / `requireStaff()` helpers for Route Handlers — written once,
   used everywhere, so authorization is never re-implemented per route.
 
-### Phase 3 — Onboarding — API ✅, mobile screens still on the in-memory draft
+### Phase 3 — Onboarding ✅ (see D12 — one submit at the end, not per step)
 - 4 screens, skippable medical history, progress persisted per step so a drop-out resumes.
 - Writes `patients` (`is_self: true`) + `medical_histories`.
 - Notification permission requested on the last screen, with a reason shown first.
@@ -341,7 +343,7 @@ lands before everything that depends on it.
   the remaining window, lead-time boundary, DST spring-forward, DST fall-back, and a
   concurrent double-book. This is the one place tests are non-negotiable for v1.
 
-### Phase 5 — Booking UX — API ✅ + staff schedule ✅; mobile still hard-coded
+### Phase 5 — Booking UX ✅ (mobile flow + appointment detail with cancel; staff schedule ✅)
 - Mobile: service picker → dentist picker → calendar with real slots → confirm → detail
   screen with cancel/reschedule.
 - Web dashboard: day and week views across dentists, click-through to the patient record
@@ -358,18 +360,18 @@ lands before everything that depends on it.
 - Photo attachments upload to ImageKit's private folder via server-signed params; the
   message carries a signed URL.
 
-### Phase 8 — AI assistant — API ✅, mobile screen still local state
+### Phase 8 — AI assistant ✅ (mobile thread is session-only — no storage yet)
 - `POST /api/ai/chat` — streams from `gpt-4o-mini`, persists to `ai_conversations` /
   `ai_messages`.
 - Emergency keyword check runs **before** the model call and returns the hard-coded card.
 - System prompt: education only, no diagnosis, no dosages, always offer to book.
 - Persistent disclaimer in the chat UI header.
 
-### Phase 9 — Visit history & post-op notes — API ✅ + staff compose ✅
+### Phase 9 — Visit history & post-op notes ✅ (patient timeline = Past tab → appointment detail)
 - Patient timeline of past appointments with their `visit_notes`.
 - Staff compose notes from the appointment detail view on the dashboard.
 
-### Phase 10 — Family members — API ✅, mobile UI pending
+### Phase 10 — Family members — API ✅; booking picks any family member ✅, add/edit dependents still pending
 - Add/edit dependent profiles from the mobile profile screen.
 - A "who is this for?" step enters the booking flow; home shows appointments across the
   whole family.
@@ -406,6 +408,10 @@ Recorded here because §4 above is now partly built and these differ from what i
 | D7 | **`services` gained a `key` column** (`checkup`, `cleaning`, `pain`, `white`, `ortho`, `resto`, `followup`, `video`). | Lets the mobile app keep its existing per-service artwork keyed to a stable id instead of matching on a display name. |
 | D8 | **`push_tokens` and `attachments` tables deferred** to their own phases. | Nothing references them yet. Adding a table later is a migration; carrying an unused one is dead weight. |
 | D9 | **Teleconsult `stream_call_id` is derived server-side** as `appointment-{id}` at booking time, even though Phase 6 is not built. | It is one line at insert, and it means the call id is never client-supplied later. |
+| D10 | **No data-fetching library on mobile.** `src/lib/api.tsx` is the whole client: a Clerk-token `fetch` wrapper, a `useApi` hook that refetches on screen focus, and a `MeProvider` holding `/api/me`. | Refetch-on-focus is all the cache invalidation these screens need, and it is ~90 lines. React Query earns its place when there is state worth sharing between screens that a refocus cannot fix. |
+| D11 | **`service.key` rides along on appointment payloads**, not just on `/api/services`. | The mobile cards pick their artwork by key (D7). Matching on a display name would break the moment the clinic renames a service. |
+| D12 | **Onboarding posts once, from step 4** — not per step as §4 assumed. | `hasOnboarded` is defined as "a `is_self` patient row exists". Writing that at step 1 would mark onboarding done for someone who then drops out at step 2, and they would never be asked again. Resuming a drop-out needs a separate progress flag, which v1 does not have. |
+| D13 | **Preferred appointment time (onboarding step 4) is collected but not stored.** | No column, and no scheduling behaviour reads it yet. Adding one is a migration for a field nothing consumes. |
 
 
 ## 5. Verification

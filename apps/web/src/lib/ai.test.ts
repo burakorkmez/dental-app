@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { externalTransmissionApproved, isEmergency } from './ai';
+import { AI_FALLBACK_REPLY, externalTransmissionApproved, isEmergency, replyStream } from './ai';
 
 describe('isEmergency', () => {
   const emergencies = [
@@ -56,5 +56,61 @@ describe('externalTransmissionApproved — fails closed', () => {
   it('allows only the exact string "true"', () => {
     process.env.OPENAI_TRANSMISSION_APPROVED = 'true';
     expect(externalTransmissionApproved()).toBe(true);
+  });
+});
+
+describe('replyStream', () => {
+  const chunks = (...deltas: (string | null)[]) => ({
+    async *[Symbol.asyncIterator]() {
+      for (const content of deltas) yield { choices: [{ delta: { content } }] };
+    },
+  });
+
+  const read = async (s: ReadableStream<Uint8Array>) => {
+    const reader = s.getReader();
+    const decoder = new TextDecoder();
+    let out = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return out;
+      out += decoder.decode(value, { stream: true });
+    }
+  };
+
+  it('streams each delta and hands the whole reply to onDone', async () => {
+    let saved = '';
+    const body = await read(
+      replyStream(chunks('Flossing ', null, 'once a day ', 'is enough.'), async (r) => {
+        saved = r;
+      })
+    );
+    expect(body).toBe('Flossing once a day is enough.');
+    expect(saved).toBe(body);
+  });
+
+  it('falls back when the model streams nothing', async () => {
+    let saved = '';
+    const body = await read(
+      replyStream(chunks(null, ''), async (r) => {
+        saved = r;
+      })
+    );
+    expect(body).toBe(AI_FALLBACK_REPLY);
+    expect(saved).toBe(AI_FALLBACK_REPLY);
+  });
+
+  it('keeps the partial answer when the stream breaks mid-reply', async () => {
+    const broken = {
+      async *[Symbol.asyncIterator]() {
+        yield { choices: [{ delta: { content: 'Rinse with warm salt water' } }] };
+        throw new Error('upstream died');
+      },
+    };
+    let saved = '';
+    const body = await read(replyStream(broken, async (r) => {
+      saved = r;
+    }));
+    expect(body).toBe('Rinse with warm salt water');
+    expect(saved).toBe(body);
   });
 });

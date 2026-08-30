@@ -13,7 +13,7 @@ export type AppointmentRow = {
     specialty: string | null;
     photoUrl: string | null;
   } | null;
-  service: { id: string; name: string; durationMinutes: number; isTeleconsult: boolean } | null;
+  service: { id: string; key: string; name: string; durationMinutes: number; isTeleconsult: boolean } | null;
 };
 
 /**
