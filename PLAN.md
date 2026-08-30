@@ -186,8 +186,17 @@ hits Drizzle directly, no HTTP hop.
 
 Education and triage only. The system prompt hard-forbids diagnosis, prescription, and
 dosage advice; every substantive answer ends by offering to book. **No patient record is
-ever sent to OpenAI** — this is a deliberate architectural choice that keeps PHI out of
-the model entirely and removes OpenAI from the BAA critical path.
+ever sent to OpenAI** — no name, DOB, medical history or appointment is ever attached to
+a completion request.
+
+That is narrower than "no PHI reaches OpenAI", and the earlier wording here overstated
+it. The patient types free text; a symptom description tied to a `user_id` is
+individually identifiable, and nothing stops a patient typing their own name. So the
+outbound call is gated on `OPENAI_TRANSMISSION_APPROVED`, which **fails closed** — set it
+only where the deployment holds no real patient data (A15) or a signed BAA covers OpenAI.
+Until one of those is true in production, the assistant returns
+`503 ai_transmission_blocked` rather than transmitting. The emergency card is local and
+keeps working regardless.
 
 Emergency keywords (uncontrolled bleeding, facial swelling, trouble breathing/swallowing,
 knocked-out tooth, jaw trauma) short-circuit the model with a hard-coded card: call the
@@ -208,6 +217,9 @@ Conversations persist in Postgres so the thread survives an app restart.
 - Delete-account flow removes patient rows and revokes Stream/ImageKit assets.
 - **BAAs required before real patient data enters the system:** Clerk, Neon, Stream,
   ImageKit, Sentry, Vercel. Tracked as a risk below, not as code.
+- **OpenAI** was originally left off that list on the strength of the overstated claim
+  above. It belongs on it *unless* `OPENAI_TRANSMISSION_APPROVED` stays unset in
+  production — the gate is what keeps the omission honest.
 
 ---
 
@@ -284,21 +296,21 @@ it's the kind of thing that eats an afternoon.
 Phases are ordered so that something is demoable early and the risky part (scheduling)
 lands before everything that depends on it.
 
-### Phase 0 — Foundation
+### Phase 0 — Foundation ✅ (except `packages/shared`, see D1; Sentry not wired)
 - npm workspace: `apps/mobile`, `apps/web`, `packages/shared`.
 - `apps/web`: Next.js 16.3.3 App Router, Drizzle 0.45.2 + Neon, Sentry.
 - `apps/mobile`: Expo 57 + expo-router 57, Sentry.
 - `.env.example` in both apps listing every key. Nothing hardcoded.
 - **`PLAN.md` written to the project root**, carrying this spec forward for future sessions.
 
-### Phase 1 — Schema & seed
+### Phase 1 — Schema & seed ✅
 - Full Drizzle schema per the data model above, including the raw-SQL migration for the
   `EXCLUDE USING gist` constraint (Drizzle won't generate it; it goes in a hand-edited
   migration file).
 - Seed script: 3 dentists, ~8 services with real durations, working hours, and a handful
   of fake patients so screens are never empty during the demo.
 
-### Phase 2 — Auth
+### Phase 2 — Auth ✅ (backend + mobile sign-in; staff role set in Clerk)
 - Clerk on both apps. Apple + Google providers only.
 - `POST /api/webhooks/clerk` — verify with `verifyWebhook`, sync `users`.
 - Role in `publicMetadata`, enforced in `apps/web/middleware.ts`. Staff invited from the
@@ -314,12 +326,12 @@ lands before everything that depends on it.
 - Shared `requireAuth()` / `requireStaff()` helpers for Route Handlers — written once,
   used everywhere, so authorization is never re-implemented per route.
 
-### Phase 3 — Onboarding
+### Phase 3 — Onboarding — API ✅, mobile screens still on the in-memory draft
 - 4 screens, skippable medical history, progress persisted per step so a drop-out resumes.
 - Writes `patients` (`is_self: true`) + `medical_histories`.
 - Notification permission requested on the last screen, with a reason shown first.
 
-### Phase 4 — Scheduling engine ← the critical phase
+### Phase 4 — Scheduling engine ✅ ← the critical phase
 - `apps/web/lib/scheduling.ts` with `availableSlots()` as specified.
 - `GET /api/availability?dentistId&serviceId&from&to`
 - `POST /api/appointments` — server computes `ends_at`, relies on the DB constraint,
@@ -329,7 +341,7 @@ lands before everything that depends on it.
   the remaining window, lead-time boundary, DST spring-forward, DST fall-back, and a
   concurrent double-book. This is the one place tests are non-negotiable for v1.
 
-### Phase 5 — Booking UX
+### Phase 5 — Booking UX — API ✅ + staff schedule ✅; mobile still hard-coded
 - Mobile: service picker → dentist picker → calendar with real slots → confirm → detail
   screen with cancel/reschedule.
 - Web dashboard: day and week views across dentists, click-through to the patient record
@@ -346,18 +358,18 @@ lands before everything that depends on it.
 - Photo attachments upload to ImageKit's private folder via server-signed params; the
   message carries a signed URL.
 
-### Phase 8 — AI assistant
+### Phase 8 — AI assistant — API ✅, mobile screen still local state
 - `POST /api/ai/chat` — streams from `gpt-4o-mini`, persists to `ai_conversations` /
   `ai_messages`.
 - Emergency keyword check runs **before** the model call and returns the hard-coded card.
 - System prompt: education only, no diagnosis, no dosages, always offer to book.
 - Persistent disclaimer in the chat UI header.
 
-### Phase 9 — Visit history & post-op notes
+### Phase 9 — Visit history & post-op notes — API ✅ + staff compose ✅
 - Patient timeline of past appointments with their `visit_notes`.
 - Staff compose notes from the appointment detail view on the dashboard.
 
-### Phase 10 — Family members
+### Phase 10 — Family members — API ✅, mobile UI pending
 - Add/edit dependent profiles from the mobile profile screen.
 - A "who is this for?" step enters the booking flow; home shows appointments across the
   whole family.
@@ -376,6 +388,25 @@ lands before everything that depends on it.
 - EAS build → TestFlight.
 
 ---
+
+---
+
+## 6. Decisions since the plan was written
+
+Recorded here because §4 above is now partly built and these differ from what it assumed.
+
+| # | Decision | Why |
+|---|---|---|
+| D1 | **`packages/shared` not created.** Zod schemas live in `apps/web/src/lib/validation.ts`. | There is exactly one consumer today. It becomes a package the moment mobile needs to import a type, not before. |
+| D2 | **`middleware.ts` is `proxy.ts`.** Next 16 renamed the convention. | Not optional — `middleware.ts` is deprecated in 16. |
+| D3 | **No route matching in `proxy.ts`.** `clerkMiddleware()` runs bare; every guard is resource-based (`requireStaff()` in the dashboard layout, `requireAuth()` in each route). | Clerk Core 3 deprecated `createRouteMatcher`: path matching can diverge from how Next routes and leave a resource reachable. Also lets API routes answer a mobile client with JSON 401 instead of an HTML redirect. |
+| D4 | **`requireAuth()` upserts the `users` row** instead of waiting for the Clerk webhook. | Webhook delivery is eventually consistent; a new patient must not be blocked on it. The webhook stays the backstop for updates and deletes. |
+| D5 | **Availability aggregates across every dentist offering the service**, and each slot carries its `dentistId`. `?dentistId=` narrows it. | The mobile booking flow picks a time, not a dentist — there is no dentist picker in the built UI. |
+| D6 | **`@date-fns/tz` added** for clinic-local → UTC expansion. | Hand-rolled DST math is exactly the flimsy-algorithm risk R4 warns about. One small dependency, and the DST tests prove it. |
+| D7 | **`services` gained a `key` column** (`checkup`, `cleaning`, `pain`, `white`, `ortho`, `resto`, `followup`, `video`). | Lets the mobile app keep its existing per-service artwork keyed to a stable id instead of matching on a display name. |
+| D8 | **`push_tokens` and `attachments` tables deferred** to their own phases. | Nothing references them yet. Adding a table later is a migration; carrying an unused one is dead weight. |
+| D9 | **Teleconsult `stream_call_id` is derived server-side** as `appointment-{id}` at booking time, even though Phase 6 is not built. | It is one line at insert, and it means the call id is never client-supplied later. |
+
 
 ## 5. Verification
 
