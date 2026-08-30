@@ -1,11 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
-import { isEmergency } from './ai';
+import { externalTransmissionApproved, isEmergency } from './ai';
 
 describe('isEmergency', () => {
   const emergencies = [
     'my face is swollen and I have trouble breathing',
     'I have facial swelling on the left side',
+    'my face is very swollen',
+    'my swollen face is getting worse',
     'swelling in my neck since last night',
     "the bleeding won't stop after my extraction",
     'uncontrolled bleeding from the socket',
@@ -31,5 +33,28 @@ describe('isEmergency', () => {
 
   it.each(routine)('does not flag: %s', (msg) => {
     expect(isEmergency(msg)).toBe(false);
+  });
+});
+
+describe('externalTransmissionApproved — fails closed', () => {
+  const original = process.env.OPENAI_TRANSMISSION_APPROVED;
+  afterEach(() => {
+    if (original === undefined) delete process.env.OPENAI_TRANSMISSION_APPROVED;
+    else process.env.OPENAI_TRANSMISSION_APPROVED = original;
+  });
+
+  it('blocks when the variable is unset', () => {
+    delete process.env.OPENAI_TRANSMISSION_APPROVED;
+    expect(externalTransmissionApproved()).toBe(false);
+  });
+
+  it.each(['false', '', '1', 'TRUE', 'yes', 'true '])('blocks on %o', (value) => {
+    process.env.OPENAI_TRANSMISSION_APPROVED = value;
+    expect(externalTransmissionApproved()).toBe(false);
+  });
+
+  it('allows only the exact string "true"', () => {
+    process.env.OPENAI_TRANSMISSION_APPROVED = 'true';
+    expect(externalTransmissionApproved()).toBe(true);
   });
 });

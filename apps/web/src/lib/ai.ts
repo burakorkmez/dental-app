@@ -1,10 +1,27 @@
 /**
  * Education and triage only.
  *
- * NO PATIENT RECORD IS EVER SENT TO OPENAI. Nothing in this file reads the
- * patients or medical_histories tables, and nothing that calls it may pass one
- * in. That keeps PHI out of the model entirely and OpenAI off the BAA path.
+ * NO PATIENT RECORD IS EVER SENT TO OPENAI. Nothing here reads the patients or
+ * medical_histories tables, and nothing that calls it may pass one in.
+ *
+ * That is NOT the same as "no PHI reaches OpenAI". The patient types free text,
+ * and a symptom description bound to a user_id is individually identifiable —
+ * a patient can also simply type their own name or date of birth. No system
+ * prompt prevents that, and no classifier should be trusted to detect it.
+ * Whether this deployment may transmit that text is therefore a deployment
+ * decision, gated below, not a property the code can infer from the content.
  */
+
+/**
+ * Fails closed. Set OPENAI_TRANSMISSION_APPROVED=true only when one of these
+ * genuinely holds for the deployment:
+ *   - it carries no real patient data (the seeded demo — PLAN.md A15), or
+ *   - a signed BAA covers OpenAI (PLAN.md R1).
+ * Anything else — unset, "false", "1", "TRUE" — blocks the outbound call.
+ */
+export function externalTransmissionApproved(): boolean {
+  return process.env.OPENAI_TRANSMISSION_APPROVED === 'true';
+}
 
 export const AI_MODEL = 'gpt-4o-mini';
 
@@ -29,7 +46,8 @@ How to answer:
  */
 const EMERGENCY_PATTERNS: RegExp[] = [
   /\b(can'?t|cannot|trouble|difficulty|hard to)\s+(breath|breathe|swallow)/i,
-  /\b(face|facial|cheek|jaw|neck|throat|eye)\s+(is\s+)?(swollen|swelling)/i,
+  /\b(?:face|facial|cheek|jaw|neck|throat|eye)\s+(?:\w+\s+){0,2}(?:swollen|swelling)/i,
+  /\b(?:swollen|swelling)\s+(?:\w+\s+){0,2}(?:face|facial|cheek|jaw|neck|throat|eye)\b/i,
   /\bswelling\s+(in|of|on)\s+(my\s+)?(face|cheek|jaw|neck|throat|eye)/i,
   /\b(uncontrolled|won'?t stop|can'?t stop|non[- ]?stop|heavy)\s+bleed/i,
   /\bbleeding\s+(that\s+)?(won'?t|will not|does ?n[o']?t)\s+stop/i,

@@ -3,7 +3,13 @@ import OpenAI from 'openai';
 
 import { db } from '@/db';
 import { aiConversations, aiMessages } from '@/db/schema';
-import { AI_MODEL, EMERGENCY_REPLY, isEmergency, SYSTEM_PROMPT } from '@/lib/ai';
+import {
+  AI_MODEL,
+  EMERGENCY_REPLY,
+  externalTransmissionApproved,
+  isEmergency,
+  SYSTEM_PROMPT,
+} from '@/lib/ai';
 import { requireAuth } from '@/lib/auth';
 import { ApiError, json, notFound, route } from '@/lib/http';
 import { aiChatSchema } from '@/lib/validation';
@@ -12,7 +18,9 @@ import { aiChatSchema } from '@/lib/validation';
  * Education and triage only. The thread persists so it survives an app restart.
  *
  * What is sent to OpenAI: the system prompt and this conversation's messages.
- * Nothing else. No name, no DOB, no medical history, no appointments.
+ * Nothing else — no record is ever attached. But the messages are patient-typed
+ * free text, so they may still carry identifiers; see lib/ai.ts. The outbound
+ * call is gated on an explicit deployment approval and fails closed.
  */
 export const POST = route(async (req: Request) => {
   const user = await requireAuth();
@@ -54,6 +62,17 @@ export const POST = route(async (req: Request) => {
 
   if (!process.env.OPENAI_API_KEY) {
     throw new ApiError(503, 'The assistant is not configured yet.', 'ai_unconfigured');
+  }
+
+  // Everything above this line stays local — the emergency card in particular,
+  // which must keep working even when the model is unreachable. Past this point
+  // patient-typed text leaves our boundary, so it needs explicit approval.
+  if (!externalTransmissionApproved()) {
+    throw new ApiError(
+      503,
+      'The assistant is unavailable in this environment.',
+      'ai_transmission_blocked'
+    );
   }
 
   const history = await db

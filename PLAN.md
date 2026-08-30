@@ -186,8 +186,17 @@ hits Drizzle directly, no HTTP hop.
 
 Education and triage only. The system prompt hard-forbids diagnosis, prescription, and
 dosage advice; every substantive answer ends by offering to book. **No patient record is
-ever sent to OpenAI** — this is a deliberate architectural choice that keeps PHI out of
-the model entirely and removes OpenAI from the BAA critical path.
+ever sent to OpenAI** — no name, DOB, medical history or appointment is ever attached to
+a completion request.
+
+That is narrower than "no PHI reaches OpenAI", and the earlier wording here overstated
+it. The patient types free text; a symptom description tied to a `user_id` is
+individually identifiable, and nothing stops a patient typing their own name. So the
+outbound call is gated on `OPENAI_TRANSMISSION_APPROVED`, which **fails closed** — set it
+only where the deployment holds no real patient data (A15) or a signed BAA covers OpenAI.
+Until one of those is true in production, the assistant returns
+`503 ai_transmission_blocked` rather than transmitting. The emergency card is local and
+keeps working regardless.
 
 Emergency keywords (uncontrolled bleeding, facial swelling, trouble breathing/swallowing,
 knocked-out tooth, jaw trauma) short-circuit the model with a hard-coded card: call the
@@ -208,6 +217,9 @@ Conversations persist in Postgres so the thread survives an app restart.
 - Delete-account flow removes patient rows and revokes Stream/ImageKit assets.
 - **BAAs required before real patient data enters the system:** Clerk, Neon, Stream,
   ImageKit, Sentry, Vercel. Tracked as a risk below, not as code.
+- **OpenAI** was originally left off that list on the strength of the overstated claim
+  above. It belongs on it *unless* `OPENAI_TRANSMISSION_APPROVED` stays unset in
+  production — the gate is what keeps the omission honest.
 
 ---
 

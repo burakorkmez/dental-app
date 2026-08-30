@@ -110,7 +110,7 @@ export const PATCH = route(async (req: Request, ctx: Ctx) => {
   try {
     const [updated] = await db
       .update(appointments)
-      .set({ startsAt, endsAt, dentistId })
+      .set({ startsAt, endsAt, dentistId, reminder24hSentAt: null, reminder1hSentAt: null })
       .where(eq(appointments.id, row.appointment.id))
       .returning();
 
