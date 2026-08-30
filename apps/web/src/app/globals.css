@@ -1,1 +1,69 @@
 @import "tailwindcss";
+
+/**
+ * DentaCare design system — tokens lifted from apps/mobile/design/design-system.png
+ * so the dashboard and the patient app read as one product. Light mode only.
+ */
+@theme {
+  --color-aqua: #24d4df;
+  --color-turquoise: #26c6da;
+  --color-cyan-glow: #8af5ff;
+  --color-deep: #075a92;
+  --color-navy: #17324a;
+  --color-muted: #72889a;
+  --color-powder: #eaf6ff;
+  --color-page: #f7fbff;
+  --color-hairline: #e6f2fb;
+  --color-success: #34c79a;
+  --color-coral: #ff7a6b;
+  --color-aqua-ink: #12a2bc;
+
+  --radius-card: 20px;
+  --radius-tile: 16px;
+
+  --font-sans: "SF Pro Display", "SF Pro Text", -apple-system, BlinkMacSystemFont,
+    "Inter", "Segoe UI", sans-serif;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-page);
+    color: var(--color-navy);
+    font-family: var(--font-sans);
+    /* The mockups sit on a powder wash, not flat white. */
+    background-image:
+      radial-gradient(1200px 600px at 15% -10%, #e3f2ff 0%, transparent 60%),
+      radial-gradient(900px 500px at 95% 0%, #eafaff 0%, transparent 55%);
+    background-attachment: fixed;
+  }
+}
+
+@utility card {
+  background-color: #fff;
+  border: 1px solid var(--color-hairline);
+  border-radius: var(--radius-card);
+  /* Soft Card Shadow — 0 4px 16px rgba(7,90,146,0.08) */
+  box-shadow: 0 4px 16px rgba(7, 90, 146, 0.08);
+}
+
+@utility card-floating {
+  /* Floating Shadow — 0 12px 32px rgba(7,90,146,0.12) */
+  box-shadow: 0 12px 32px rgba(7, 90, 146, 0.12);
+}
+
+/** Aqua controls: vertical gradient body, white gloss off the top edge, aqua shadow. */
+@utility btn-aqua {
+  background-image: linear-gradient(180deg, #74d6ec 0%, #0dacc3 100%);
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 6px 12px rgba(15, 156, 184, 0.34);
+}
+
+@utility btn-glass {
+  background-image: linear-gradient(180deg, #fbfdff 0%, #e5f1fb 100%);
+  color: var(--color-navy);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    0 5px 12px rgba(10, 91, 150, 0.17);
+}
