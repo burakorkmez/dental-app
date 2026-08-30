@@ -304,6 +304,13 @@ lands before everything that depends on it.
 - Role in `publicMetadata`, enforced in `apps/web/middleware.ts`. Staff invited from the
   Clerk dashboard.
 - Mobile: `@clerk/expo` 4.6.1 with token cache, expo-router protected routes.
+  Clerk app "Dentify" (`app_3IafLz8ynbSqP41ao10hlS3LvwX`). Sign-in is the browser SSO
+  flow (`useSSO`); Clerk's native module is excluded from Expo autolinking, since
+  linking it pulls the Clerk iOS SDK over SPM and raises the iOS floor to 17. Reverse
+  the exclude in `apps/mobile/package.json` and add the `@clerk/expo` config plugin if
+  the native sign-in sheets or `AuthView`/`UserButton` are ever wanted.
+  **Apple is not enabled yet** — it needs an Apple Developer Services ID + key in the
+  Clerk dashboard. Google works today.
 - Shared `requireAuth()` / `requireStaff()` helpers for Route Handlers — written once,
   used everywhere, so authorization is never re-implemented per route.
 
