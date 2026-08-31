@@ -73,7 +73,9 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:ios": "npx eas-cli build --profile development --platform ios",
+    "build:android": "npx eas-cli build --profile development --platform android"
   },
   "private": true,
   "reanimated": {

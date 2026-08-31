@@ -7,6 +7,8 @@
   ],
   "scripts": {
     "mobile": "npm run start -w apps/mobile",
+    "build:ios": "npm run build:ios -w apps/mobile",
+    "build:android": "npm run build:android -w apps/mobile",
     "web": "npm run dev -w apps/web",
     "test": "npm run test -w apps/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
