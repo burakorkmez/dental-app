@@ -32,6 +32,7 @@ async function loadOwned(userId: string, appointmentId: string) {
       },
       service: {
         id: services.id,
+        key: services.key,
         name: services.name,
         durationMinutes: services.durationMinutes,
         isTeleconsult: services.isTeleconsult,

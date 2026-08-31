@@ -2,6 +2,8 @@ import { router } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { Pressable, Text, View } from 'react-native';
 
+import type { FamilyMember, Service, Slot } from '@/lib/api';
+
 /** Sampled from design/book-app-*.png */
 export const B = {
   page: '#EBF5FD',
@@ -19,12 +21,40 @@ export const B = {
 // surfaces only — every button/chip comes from '@/components/ui' (see AGENTS.md)
 export { SHADOW_GLASS as SHADOW } from './ui';
 
-/** Shared across the three booking steps (same pattern as the onboarding draft). */
-export const booking = {
-  who: 0,
-  reason: 'Cleaning',
-  date: new Date(),
-  time: '10:30 AM',
+/** Today in the device's own calendar — the day the picker opens on. */
+export function todayISO(): string {
+  const d = new Date();
+  return toISODay(d);
+}
+
+export const toISODay = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+/** 'YYYY-MM-DD' back to a local Date, without the UTC shift `new Date(str)` adds. */
+export const fromISODay = (iso: string) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d);
+};
+
+/**
+ * Shared across the three booking steps. Ids, not labels: `POST
+ * /api/appointments` takes a patientId, a serviceId, the dentistId that came
+ * back on the slot, and the slot's exact `startsAt`. The client never invents a
+ * time — it only ever hands back one the availability endpoint offered.
+ */
+export const booking: {
+  patient: FamilyMember | null;
+  service: Service | null;
+  /** Clinic-local calendar day being browsed, as YYYY-MM-DD. */
+  day: string;
+  slot: Slot | null;
+  dentistName: string;
+} = {
+  patient: null,
+  service: null,
+  day: todayISO(),
+  slot: null,
+  dentistName: '',
 };
 
 export const formatDate = (d: Date) =>

@@ -181,29 +181,32 @@ export function Field({
   );
 }
 
-// ponytail: in-memory draft, session-only. Phase 3 replaces it with the API
-// call that saves the patient profile.
-export const draft = {
+/**
+ * The four steps write here and step 4 posts the whole thing, so a back-swipe
+ * doesn't lose what was typed. Cleared once it reaches the server — nothing
+ * medical should outlive the submit in memory.
+ */
+const EMPTY = () => ({
   firstName: '',
   lastName: '',
   dob: '',
   phone: '',
   gender: 'Male',
-  allergies: ['Penicillin'] as string[],
-  medications: ['None'] as string[],
+  allergies: [] as string[],
+  medications: [] as string[],
   smokes: false,
   pregnant: false,
   notes: '',
   anxiety: 5,
-  services: ['cleaning', 'pain'] as string[],
+  /** False when step 2 was skipped — "not asked" is not the same as "none". */
+  medicalDone: false,
+  services: [] as { key: string; name: string }[],
   preferredTime: 'Morning',
   heardAbout: 'Friend / Family',
   extraNotes: '',
-};
+});
 
-// ponytail: hard-coded, session-only. The real value comes from the API in
-// Phase 3 — set this to true to skip onboarding and land straight on home.
-export let hasOnboarded = true;
-export const finishOnboarding = () => {
-  hasOnboarded = true;
-};
+export const draft = EMPTY();
+
+/** Fresh arrays every time — a reset must not hand back the ones already edited. */
+export const resetDraft = () => Object.assign(draft, EMPTY());

@@ -1,7 +1,14 @@
-import { DefaultTheme, ThemeProvider } from 'expo-router';
+import { DefaultTheme, Redirect, ThemeProvider } from 'expo-router';
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
 
+import { useMe } from '@/lib/api';
+
 export default function TabsLayout() {
+  // One gate for every tab: a half-onboarded patient has no `self` record, so
+  // each screen underneath would otherwise render empty fields and no-op saves.
+  const { me } = useMe();
+  if (me && !me.hasOnboarded) return <Redirect href="/onboarding/step1" />;
+
   return (
     <ThemeProvider value={DefaultTheme}>
       <NativeTabs tintColor="#159FC6" labelStyle={{ color: '#5D7C93' }}>

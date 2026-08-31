@@ -8,6 +8,7 @@ import { SymbolView } from 'expo-symbols';
 import { useState } from 'react';
 import {
   ActionSheetIOS,
+  Alert,
   KeyboardAvoidingView,
   Pressable,
   ScrollView,
@@ -16,7 +17,8 @@ import {
   View,
 } from 'react-native';
 
-import { AQUA_BODY, PrimaryButton } from '@/components/ui';
+import { AQUA_BODY, PrimaryButton, useAvatar } from '@/components/ui';
+import { useApiClient, useMe } from '@/lib/api';
 
 const C = {
   page: '#EEF5FA',
@@ -34,6 +36,16 @@ const GENDERS = ['Male', 'Female', 'Other'];
 const formatDob = (d: Date) =>
   d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 
+/** The column is a `date`, so it travels as YYYY-MM-DD with no timezone attached. */
+const toISODate = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+const fromISODate = (iso: string | null) => {
+  if (!iso) return null;
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d);
+};
+
 const FIELD_SHADOW = {
   shadowColor: '#0A5B96',
   shadowOffset: { width: 0, height: 4 },
@@ -47,6 +59,7 @@ function Field({
   value,
   onChangeText,
   onPress,
+  editable = true,
   keyboardType,
   autoCapitalize,
 }: {
@@ -54,6 +67,8 @@ function Field({
   value: string;
   onChangeText?: (v: string) => void;
   onPress?: () => void;
+  /** False for values this app can't change — the email lives in Clerk. */
+  editable?: boolean;
   keyboardType?: 'email-address' | 'phone-pad';
   autoCapitalize?: 'none' | 'words';
 }) {
@@ -79,10 +94,11 @@ function Field({
           <TextInput
             value={value}
             onChangeText={onChangeText}
+            editable={editable}
             keyboardType={keyboardType}
             autoCapitalize={autoCapitalize}
             className="flex-1 text-[15px] font-semibold"
-            style={{ color: C.navy }}
+            style={{ color: editable ? C.navy : C.sub }}
           />
         )}
         {onPress ? (
@@ -94,18 +110,53 @@ function Field({
 }
 
 export default function PersonalDetails() {
-  const [name, setName] = useState('Alex Johnson');
-  const [email, setEmail] = useState('alex.johnson@email.com');
-  const [phone, setPhone] = useState('+1 234 567 890');
-  const [dob, setDob] = useState(new Date(1990, 4, 15));
-  const [gender, setGender] = useState('Male');
+  const { me, refresh } = useMe();
+  const avatar = useAvatar();
+  const call = useApiClient();
+  const self = me?.self;
+
+  // `me` is already loaded by the time this screen can be reached, so seeding
+  // state from it directly is enough — no effect to sync.
+  const [name, setName] = useState(self ? `${self.firstName} ${self.lastName}` : '');
+  const [phone, setPhone] = useState(self?.phone ?? '');
+  const [dob, setDob] = useState<Date | null>(fromISODate(self?.dateOfBirth ?? null));
+  const [gender, setGender] = useState(self?.gender ?? 'Male');
   const [dobOpen, setDobOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const pickGender = () =>
     ActionSheetIOS.showActionSheetWithOptions(
       { options: [...GENDERS, 'Cancel'], cancelButtonIndex: GENDERS.length, title: 'Gender' },
       (i) => i < GENDERS.length && setGender(GENDERS[i]),
     );
+
+  const save = async () => {
+    if (!self || saving) return;
+    const [firstName, ...rest] = name.trim().split(/\s+/);
+    if (!firstName || rest.length === 0) {
+      Alert.alert('Name needed', 'Please enter both a first and a last name.');
+      return;
+    }
+    setSaving(true);
+    try {
+      await call(`/api/patients/${self.id}`, {
+        method: 'PATCH',
+        body: {
+          firstName,
+          lastName: rest.join(' '),
+          phone: phone.trim() || null,
+          gender,
+          dateOfBirth: dob ? toISODate(dob) : null,
+        },
+      });
+      await refresh();
+      router.back();
+    } catch (err) {
+      Alert.alert('Could not save', err instanceof Error ? err.message : 'Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <View collapsable={false} style={{ flex: 1, backgroundColor: C.page }}>
@@ -134,7 +185,7 @@ export default function PersonalDetails() {
               style={{ backgroundColor: C.ring }}
             />
             <Image
-              source={require('@/assets/images/av-alex.png')}
+              source={avatar}
               style={{ width: 140, height: 140, borderRadius: 70 }}
               contentFit="cover"
             />
@@ -159,27 +210,30 @@ export default function PersonalDetails() {
 
           <View className="mt-[5px]">
             <Field label="Full Name" value={name} onChangeText={setName} autoCapitalize="words" />
-            <Field
-              label="Email"
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
+            {/* Clerk owns the email — changing it here would not stick. */}
+            <Field label="Email" value={me?.email ?? ''} editable={false} />
             <Field label="Phone" value={phone} onChangeText={setPhone} keyboardType="phone-pad" />
-            <Field label="Date of Birth" value={formatDob(dob)} onPress={() => setDobOpen(true)} />
+            <Field
+              label="Date of Birth"
+              value={dob ? formatDob(dob) : 'Not set'}
+              onPress={() => setDobOpen(true)}
+            />
             <Field label="Gender" value={gender} onPress={pickGender} />
           </View>
 
           <View className="mt-[11px]">
-            <PrimaryButton label="Save Changes" onPress={() => router.back()} />
+            <PrimaryButton
+              label={saving ? 'Saving…' : 'Save Changes'}
+              disabled={saving || !self}
+              onPress={save}
+            />
           </View>
 
           {/* native wheel — no calendar of our own to keep in sync */}
           <Host style={{ position: 'absolute' }}>
             <BottomSheet isPresented={dobOpen} onIsPresentedChange={setDobOpen} fitToContents>
               <DatePicker
-                selection={dob}
+                selection={dob ?? new Date(1990, 0, 1)}
                 range={{ end: new Date() }}
                 displayedComponents={['date']}
                 modifiers={[datePickerStyle('wheel')]}
