@@ -7,7 +7,7 @@ import { useMemo, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 
 import { B, booking, fromISODay, Header, SectionRow, SHADOW, toISODay } from '@/components/booking';
-import { AQUA_BODY, GLASS_BODY, PrimaryButton, SHADOW_GLASS, UI } from '@/components/ui';
+import { AQUA_BODY, Button, GLASS_BODY, PrimaryButton, SHADOW_GLASS, UI } from '@/components/ui';
 import { useApi, useMe, type FamilyMember, type Service } from '@/lib/api';
 
 // No patient photos in v1 — the family list gets stock avatars by position.
@@ -23,7 +23,7 @@ const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDat
 
 export default function BookingDate() {
   const { me } = useMe();
-  const { data, loading } = useApi<{ services: Service[] }>('/api/services');
+  const { data, loading, error, reload } = useApi<{ services: Service[] }>('/api/services');
   const services = data?.services ?? [];
 
   const family: FamilyMember[] = me?.family ?? [];
@@ -257,6 +257,14 @@ export default function BookingDate() {
               Select reason
             </Text>
             {loading ? <ActivityIndicator color={UI.aquaInk} /> : null}
+            {error ? (
+              <View className="py-[10px]">
+                <Text className="mb-[14px] text-[16px]" style={{ color: '#D2405B' }}>
+                  {error}
+                </Text>
+                <Button label="Try again" variant="glass" onPress={reload} />
+              </View>
+            ) : null}
             {services.map((s) => (
               <Pressable
                 key={s.id}

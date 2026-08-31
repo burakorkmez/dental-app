@@ -6,7 +6,7 @@ import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useState, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { AQUA_BODY, Button, serviceArt } from '@/components/ui';
+import { AQUA_BODY, Button, serviceArt, STATUS_LABEL } from '@/components/ui';
 import { useApi, type Appointment } from '@/lib/api';
 import { dateParts } from '@/lib/date-label';
 
@@ -34,13 +34,6 @@ const CARD_SHADOW = {
   shadowOffset: { width: 0, height: 8 },
   shadowOpacity: 0.09,
   shadowRadius: 16,
-} as const;
-
-const STATUS_LABEL = {
-  booked: 'Booked',
-  completed: 'Completed',
-  cancelled: 'Cancelled',
-  no_show: 'Missed',
 } as const;
 
 /** The video slot is a tinted tile rather than a 3D render, as in the mockup. */

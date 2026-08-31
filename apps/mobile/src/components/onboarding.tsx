@@ -186,7 +186,7 @@ export function Field({
  * doesn't lose what was typed. Cleared once it reaches the server — nothing
  * medical should outlive the submit in memory.
  */
-const EMPTY = {
+const EMPTY = () => ({
   firstName: '',
   lastName: '',
   dob: '',
@@ -204,8 +204,9 @@ const EMPTY = {
   preferredTime: 'Morning',
   heardAbout: 'Friend / Family',
   extraNotes: '',
-};
+});
 
-export const draft = { ...EMPTY };
+export const draft = EMPTY();
 
-export const resetDraft = () => Object.assign(draft, EMPTY, { allergies: [], medications: [], services: [] });
+/** Fresh arrays every time — a reset must not hand back the ones already edited. */
+export const resetDraft = () => Object.assign(draft, EMPTY());

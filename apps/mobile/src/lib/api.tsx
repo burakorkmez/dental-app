@@ -101,11 +101,21 @@ export function useApiStream() {
         if (!res.ok) {
           throw new ApiError(res.status, data?.error ?? 'Something went wrong', data?.code);
         }
+        // The body is the other side of a network boundary, not a guarantee:
+        // a proxy error page with a JSON content-type must not reach `.content`.
+        if (typeof data?.message?.content !== 'string' || typeof data?.conversationId !== 'string') {
+          throw new ApiError(res.status, 'The assistant sent back an unreadable reply');
+        }
         onText(data.message.content);
         return data.conversationId;
       }
 
-      const reader = res.body!.getReader();
+      const conversationId = res.headers.get('X-Conversation-Id');
+      if (!res.body || !conversationId) {
+        throw new ApiError(res.status, 'The assistant sent back an unreadable reply');
+      }
+
+      const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let text = '';
       for (;;) {
@@ -114,7 +124,7 @@ export function useApiStream() {
         text += decoder.decode(value, { stream: true });
         onText(text);
       }
-      return res.headers.get('X-Conversation-Id')!;
+      return conversationId;
     },
     [tokenRef]
   );
@@ -142,15 +152,23 @@ export function useApi<T>(path: string | null) {
     setLoading(path !== null);
   }
 
+  // A refocus or a path change can leave an earlier request in flight; only the
+  // newest one is allowed to write, or a slow reply for the old path lands last.
+  const latest = useRef(0);
+
   const reload = useCallback(async () => {
     if (path === null) return;
+    const seq = ++latest.current;
     try {
-      setData(await call<T>(path));
+      const next = await call<T>(path);
+      if (seq !== latest.current) return;
+      setData(next);
       setError(null);
     } catch (err) {
+      if (seq !== latest.current) return;
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
-      setLoading(false);
+      if (seq === latest.current) setLoading(false);
     }
   }, [call, path]);
 

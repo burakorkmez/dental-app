@@ -74,6 +74,9 @@ export default function BookingConfirm() {
       router.dismissTo('/home');
     } catch (err) {
       if (err instanceof ApiError && err.code === 'slot_taken') {
+        // Drop the rejected slot so the time screen cannot re-submit it.
+        booking.slot = null;
+        booking.dentistName = '';
         Alert.alert('That time just went', err.message, [
           { text: 'Pick another', onPress: () => router.back() },
         ]);

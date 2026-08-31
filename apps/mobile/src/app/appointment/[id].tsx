@@ -13,6 +13,7 @@ import {
   PageHeader,
   SectionLabel,
   serviceArt,
+  STATUS_LABEL,
 } from '@/components/ui';
 import { useApi, useApiClient, type Appointment } from '@/lib/api';
 
@@ -85,7 +86,7 @@ export default function AppointmentDetail() {
                 />
                 <View className="ml-[16px] flex-1">
                   <Text className="text-[16px] font-bold" style={{ color: PAGE.navy }}>
-                    {a.status === 'booked' ? 'Booked' : a.status.replace('_', ' ')}
+                    {STATUS_LABEL[a.status]}
                   </Text>
                   <Text className="mt-[4px] text-[13px]" style={{ color: PAGE.sub }}>
                     {a.isTeleconsult ? 'Video consultation' : 'DentaCare Clinic'}

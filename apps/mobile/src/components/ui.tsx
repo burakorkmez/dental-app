@@ -375,6 +375,14 @@ export const SERVICE_ART: Record<string, number> = {
 export const serviceArt = (key: string | undefined): number =>
   (key && SERVICE_ART[key]) || require('@/assets/images/ic-tooth.png');
 
+/** Shared so the list and the detail screen never label the same status differently. */
+export const STATUS_LABEL = {
+  booked: 'Booked',
+  completed: 'Completed',
+  cancelled: 'Cancelled',
+  no_show: 'Missed',
+} as const;
+
 /**
  * The signed-in user's own photo, straight from Clerk. Clerk always serves an
  * imageUrl — a generated initials avatar when nobody uploaded one — so the

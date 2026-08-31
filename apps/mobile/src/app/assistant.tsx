@@ -110,7 +110,15 @@ function Card({
   );
 }
 
-function IconButton({ sf, onPress }: { sf: SymbolViewProps['name']; onPress?: () => void }) {
+function IconButton({
+  sf,
+  onPress,
+  disabled,
+}: {
+  sf: SymbolViewProps['name'];
+  onPress?: () => void;
+  disabled?: boolean;
+}) {
   return (
     <Button
       label=""
@@ -121,6 +129,7 @@ function IconButton({ sf, onPress }: { sf: SymbolViewProps['name']; onPress?: ()
       leading={<SymbolView name={sf} size={22} tintColor={A.title} />}
       style={{ width: 42 }}
       onPress={onPress}
+      disabled={disabled}
     />
   );
 }
@@ -262,14 +271,16 @@ export default function Assistant() {
 
   /** Server first — clearing the screen on a failed delete would be a lie. */
   const clearHistory = () =>
-    call('/api/ai/chat', { method: 'DELETE' })
-      .then(() => {
-        conversationId = null;
-        setMsgs([]);
-      })
-      .catch((err) =>
-        Alert.alert('Could not delete', err instanceof Error ? err.message : 'Try again.')
-      );
+    pending
+      ? undefined
+      : call('/api/ai/chat', { method: 'DELETE' })
+          .then(() => {
+            conversationId = null;
+            setMsgs([]);
+          })
+          .catch((err) =>
+            Alert.alert('Could not delete', err instanceof Error ? err.message : 'Try again.')
+          );
 
   const confirmClear = () =>
     Alert.alert(
@@ -343,7 +354,7 @@ export default function Assistant() {
           </View>
           {/* Nothing to delete on the empty state — the spacer keeps the title centred. */}
           {chatting ? (
-            <IconButton sf="trash" onPress={confirmClear} />
+            <IconButton sf="trash" onPress={confirmClear} disabled={pending} />
           ) : (
             <View style={{ width: 42 }} />
           )}

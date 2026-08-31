@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { Redirect, router } from 'expo-router';
+import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -62,8 +62,6 @@ export default function Home() {
   const { data, loading } = useApi<{ appointments: Appointment[] }>(
     me?.hasOnboarded ? '/api/appointments?scope=upcoming' : null
   );
-
-  if (me && !me.hasOnboarded) return <Redirect href="/onboarding/step1" />;
 
   const next = data?.appointments[0];
 

@@ -1,8 +1,8 @@
 import { Image } from 'expo-image';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SymbolView } from 'expo-symbols';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
 
 import { B, booking, formatDate, fromISODay, Header, SHADOW } from '@/components/booking';
@@ -12,6 +12,10 @@ import { useApi, type Dentist, type Slot } from '@/lib/api';
 export default function BookingTime() {
   const service = booking.service;
   const [picked, setPicked] = useState<Slot | null>(booking.slot);
+
+  // This screen stays mounted behind confirm, so a slot the server rejected has
+  // to be dropped from local state too — not just from `booking`.
+  useFocusEffect(useCallback(() => setPicked(booking.slot), []));
 
   const { data, loading, error } = useApi<{ slots: Slot[] }>(
     service ? `/api/availability?serviceId=${service.id}&from=${booking.day}` : null

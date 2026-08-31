@@ -113,4 +113,13 @@ describe('replyStream', () => {
     expect(body).toBe('Rinse with warm salt water');
     expect(saved).toBe(body);
   });
+
+  it('still delivers the answer when persisting it fails', async () => {
+    const body = await read(
+      replyStream(chunks('Use a soft brush.'), async () => {
+        throw new Error('db down');
+      })
+    );
+    expect(body).toBe('Use a soft brush.');
+  });
 });

@@ -329,7 +329,8 @@ lands before everything that depends on it.
   used everywhere, so authorization is never re-implemented per route.
 
 ### Phase 3 — Onboarding ✅ (see D12 — one submit at the end, not per step)
-- 4 screens, skippable medical history, progress persisted per step so a drop-out resumes.
+- 4 screens, skippable medical history, held in an in-memory draft and written once
+  at step 4 — a drop-out before then starts over (D12).
 - Writes `patients` (`is_self: true`) + `medical_histories`.
 - Notification permission requested on the last screen, with a reason shown first.
 
@@ -360,7 +361,7 @@ lands before everything that depends on it.
 - Photo attachments upload to ImageKit's private folder via server-signed params; the
   message carries a signed URL.
 
-### Phase 8 — AI assistant ✅ (mobile thread is session-only — no storage yet)
+### Phase 8 — AI assistant ✅ (thread persisted in `ai_conversations` / `ai_messages`)
 - `POST /api/ai/chat` — streams from `gpt-4o-mini`, persists to `ai_conversations` /
   `ai_messages`.
 - Emergency keyword check runs **before** the model call and returns the hard-coded card.

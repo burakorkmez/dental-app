@@ -81,7 +81,8 @@ type StreamChunk = { choices?: { delta?: { content?: string | null } }[] };
  * Turns a chat-completion stream into a plain-text response body: raw deltas,
  * no SSE framing, because the phone has no event-source parser and does not
  * need one. `onDone` receives the assembled reply BEFORE the stream closes, so
- * persistence cannot be lost to the response finishing first.
+ * persistence cannot be lost to the response finishing first — but a failure to
+ * persist never takes the delivered answer with it.
  *
  * A mid-stream failure keeps whatever already reached the patient rather than
  * throwing away a half-written answer.
@@ -110,7 +111,13 @@ export function replyStream(
         reply = AI_FALLBACK_REPLY;
         controller.enqueue(encoder.encode(reply));
       }
-      await onDone(reply);
+      // The patient already has the answer on screen; a failed insert must not
+      // error the stream out from under it. The turn is lost from history only.
+      try {
+        await onDone(reply);
+      } catch (err) {
+        console.error('[ai] persist failed', err instanceof Error ? err.message : err);
+      }
       controller.close();
     },
   });
