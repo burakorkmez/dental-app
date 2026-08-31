@@ -1,4 +1,5 @@
 import { useAuth } from '@clerk/expo';
+import * as Sentry from '@sentry/react-native';
 import {
   RingingCallContent,
   StreamCall,
@@ -143,6 +144,21 @@ export function StreamProvider({ children }: { children: ReactNode }) {
   const [failed, setFailed] = useState(false);
   const [wasSignedIn, setWasSignedIn] = useState(isSignedIn);
 
+  /**
+   * Dropping Stream is deliberate — booking and the assistant outlive it — but
+   * it is also completely silent: the patient just finds Messages missing and
+   * the clinic hears nothing. `stage` says which of the two waits gave up, so
+   * a token outage and a socket outage are distinguishable in Sentry.
+   */
+  const giveUpAt = useCallback((stage: 'token' | 'socket', reason: 'error' | 'timeout') => {
+    Sentry.logger.warn('stream unavailable, app running without messaging', {
+      stage,
+      reason,
+      timeout_ms: CONNECT_TIMEOUT_MS,
+    });
+    setFailed(true);
+  }, []);
+
   // Signing out — or switching account — must not leave the previous user's
   // Stream token in play while the next one is still in flight, or the app
   // briefly connects to Stream as the wrong person. Adjusted during render,
@@ -160,22 +176,22 @@ export function StreamProvider({ children }: { children: ReactNode }) {
       (next) => !cancelled && setSession(next),
       // Stream being unreachable must not take the whole app down with it —
       // booking and the assistant have nothing to do with messaging.
-      () => !cancelled && setFailed(true)
+      () => !cancelled && giveUpAt('token', 'error')
     );
     return () => {
       cancelled = true;
     };
-  }, [call, isLoaded, isSignedIn]);
+  }, [call, isLoaded, isSignedIn, giveUpAt]);
 
   // Stage 1 deadline: the token POST. Stops once a session lands.
   useEffect(() => {
     if (!isSignedIn || failed || session) return;
-    const timer = setTimeout(() => setFailed(true), CONNECT_TIMEOUT_MS);
+    const timer = setTimeout(() => giveUpAt('token', 'timeout'), CONNECT_TIMEOUT_MS);
     return () => clearTimeout(timer);
-  }, [isSignedIn, failed, session]);
+  }, [isSignedIn, failed, session, giveUpAt]);
 
   // Stage 2 deadline, owned by ConnectedStream: the chat socket.
-  const giveUp = useCallback(() => setFailed(true), []);
+  const giveUp = useCallback(() => giveUpAt('socket', 'timeout'), [giveUpAt]);
 
   if (!isLoaded) return <Connecting />;
   if (!isSignedIn || failed) return <>{children}</>;

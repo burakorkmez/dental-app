@@ -1,13 +1,18 @@
+import * as Sentry from '@sentry/react-native';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useState } from 'react';
-import { Alert, ScrollView, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 
 import { B, booking, formatDate, fromISODay, Header, SectionRow, SHADOW } from '@/components/booking';
 import { PrimaryButton, serviceArt, UI, useAvatar } from '@/components/ui';
 import { ApiError, useApiClient, type Appointment } from '@/lib/api';
+import { pickPhotos, UPLOAD_TIMEOUT_MS, type PickedPhoto } from '@/lib/photo';
+
+/** Matches the server's own per-appointment cap. */
+const MAX_ATTACHMENTS = 10;
 
 function DetailRow({
   icon,
@@ -49,8 +54,15 @@ function DetailRow({
 export default function BookingConfirm() {
   const call = useApiClient();
   const avatar = useAvatar();
-  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState<null | 'booking' | 'uploading'>(null);
+  const [photos, setPhotos] = useState<PickedPhoto[]>([]);
   const { patient, service, slot, dentistName } = booking;
+
+  const addPhotos = async () => {
+    if (busy) return;
+    const picked = await pickPhotos(MAX_ATTACHMENTS - photos.length);
+    if (picked.length) setPhotos((v) => [...v, ...picked]);
+  };
 
   /**
    * `startsAt` is handed straight back from the slot the availability endpoint
@@ -58,10 +70,10 @@ export default function BookingConfirm() {
    * constraint settles any race — a 409 here means someone else got it first.
    */
   const confirm = async () => {
-    if (!patient || !service || !slot || saving) return;
-    setSaving(true);
+    if (!patient || !service || !slot || busy) return;
+    setBusy('booking');
     try {
-      await call<{ appointment: Appointment }>('/api/appointments', {
+      const { appointment } = await call<{ appointment: Appointment }>('/api/appointments', {
         method: 'POST',
         body: {
           patientId: patient.id,
@@ -70,10 +82,58 @@ export default function BookingConfirm() {
           startsAt: slot.startsAt,
         },
       });
+      // The app's whole reason to exist (PLAN.md: "book without calling"), so
+      // it is worth a line even on success — a booking rate that falls off a
+      // cliff is otherwise invisible. Lead time and for-a-dependent are the two
+      // things that shape demand. Never the procedure: the same rule that keeps
+      // it out of a push body keeps it out of a log line.
+      Sentry.logger.info('appointment booked', {
+        lead_time_hours: Math.round(
+          (new Date(slot.startsAt).getTime() - Date.now()) / 3_600_000
+        ),
+        is_teleconsult: service.isTeleconsult,
+        for_dependent: !patient.isSelf,
+        attachments: photos.length,
+      });
+
+      // The uploads ride AFTER the booking: an attachment needs an appointment
+      // to belong to, and a photo that fails to upload must never cost the
+      // patient the slot they just won. Hence the count, not a throw.
+      let failed = 0;
+      if (photos.length) {
+        setBusy('uploading');
+        for (const photo of photos) {
+          const form = new FormData();
+          form.append('photo', photo.file);
+          try {
+            await call(`/api/appointments/${appointment.id}/attachments`, {
+              method: 'POST',
+              body: form,
+              timeoutMs: UPLOAD_TIMEOUT_MS,
+            });
+          } catch {
+            failed += 1;
+          }
+        }
+      }
+
       booking.slot = null;
       router.dismissTo('/home');
+      if (failed) {
+        Alert.alert(
+          'Appointment booked',
+          `${failed} of your ${photos.length} images could not be uploaded. You can bring them to your visit.`
+        );
+      }
     } catch (err) {
       if (err instanceof ApiError && err.code === 'slot_taken') {
+        // The exclusion constraint doing its job. Rare by design — a rate that
+        // climbs means availability is going stale before patients can confirm.
+        Sentry.logger.warn('booking lost the slot race', {
+          lead_time_hours: Math.round(
+            (new Date(slot.startsAt).getTime() - Date.now()) / 3_600_000
+          ),
+        });
         // Drop the rejected slot so the time screen cannot re-submit it.
         booking.slot = null;
         booking.dentistName = '';
@@ -87,7 +147,7 @@ export default function BookingConfirm() {
         );
       }
     } finally {
-      setSaving(false);
+      setBusy(null);
     }
   };
 
@@ -180,11 +240,56 @@ export default function BookingConfirm() {
           </View>
         </View>
 
+        <View className="mt-[24px]">
+          <SectionRow label="X-rays or documents" />
+          <Text className="mt-[6px] text-[15px]" style={{ color: B.sub, lineHeight: 21 }}>
+            Optional. Anything that helps your dentist prepare — a recent X-ray, a
+            prescription, a referral letter.
+          </Text>
+
+          <View className="mt-[14px] flex-row flex-wrap" style={{ gap: 10 }}>
+            {photos.map((photo) => (
+              <View key={photo.uri}>
+                <Image
+                  source={{ uri: photo.uri }}
+                  style={{ width: 84, height: 84, borderRadius: 16 }}
+                  contentFit="cover"
+                />
+                <Pressable
+                  hitSlop={10}
+                  accessibilityLabel="Remove image"
+                  onPress={() => setPhotos((v) => v.filter((p) => p !== photo))}
+                  className="absolute right-[-7px] top-[-7px]"
+                >
+                  <SymbolView name="xmark.circle.fill" size={24} tintColor={B.navy} />
+                </Pressable>
+              </View>
+            ))}
+
+            {photos.length < MAX_ATTACHMENTS ? (
+              <Pressable
+                onPress={addPhotos}
+                accessibilityLabel="Add an image"
+                className="h-[84px] w-[84px] items-center justify-center rounded-[16px]"
+                style={{ backgroundColor: B.field, borderWidth: 1, borderColor: B.border }}
+              >
+                <SymbolView name="plus" size={26} tintColor={B.link} />
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+
         <View className="mt-[30px]">
           <PrimaryButton
-            label={saving ? 'Booking…' : 'Confirm Appointment'}
+            label={
+              busy === 'uploading'
+                ? 'Uploading images…'
+                : busy
+                  ? 'Booking…'
+                  : 'Confirm Appointment'
+            }
             arrow
-            disabled={saving || !slot}
+            disabled={!!busy || !slot}
             onPress={confirm}
           />
         </View>

@@ -1,4 +1,5 @@
 import { useAuth } from '@clerk/expo';
+import * as Sentry from '@sentry/react-native';
 // RN's built-in fetch buffers the whole body before resolving; this one exposes
 // a real ReadableStream, which is what lets the assistant reply arrive live.
 import { fetch as streamingFetch } from 'expo/fetch';
@@ -44,7 +45,24 @@ export class ApiError extends Error {
   }
 }
 
-type Options = { method?: string; body?: unknown };
+/**
+ * `/api/patients/9f3c…/medical-history` → `/api/patients/:id/medical-history`.
+ * Two reasons, both mandatory: a raw id is a per-patient log line nobody can
+ * group or query, and it is a pointer at a record we would rather not scatter
+ * outside the boundary. The query string goes for the same reason.
+ */
+const logPath = (path: string) =>
+  path
+    .split('?')[0]
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, ':id');
+
+type Options = {
+  method?: string;
+  /** A `FormData` is passed through untouched — see `useApiClient`. */
+  body?: unknown;
+  /** Overrides `REQUEST_TIMEOUT_MS` for a call that is legitimately slower. */
+  timeoutMs?: number;
+};
 
 /**
  * Held in a ref so the fetchers below never change identity: one that churned
@@ -65,30 +83,75 @@ export function useApiClient() {
 
   return useCallback(async <T,>(path: string, options?: Options): Promise<T> => {
     const token = await tokenRef.current();
+    const method = options?.method ?? 'GET';
 
     const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
+    const timer = setTimeout(() => abort.abort(), options?.timeoutMs ?? REQUEST_TIMEOUT_MS);
+    const startedAt = Date.now();
+
+    // A photo upload is multipart, not JSON. Setting Content-Type by hand would
+    // drop the boundary fetch generates, so both are left to it.
+    const isForm = options?.body instanceof FormData;
+
+    // One wide event per failure, from the one function every screen's data
+    // goes through — so a broken endpoint shows up in Sentry once, queryable by
+    // path and status, instead of as a dozen different screen-level errors.
+    const failed = (
+      status: number,
+      code: string | undefined,
+      timedOut: boolean,
+      /** Only ever set for a rejected fetch — see the catch below. */
+      cause?: unknown
+    ) => {
+      // Scrubbed the same way `path` is: RN puts the request URL in the message.
+      const reason =
+        cause === undefined
+          ? undefined
+          : logPath(cause instanceof Error ? cause.message : String(cause));
+
+      Sentry.logger.error('api request failed', {
+        path: logPath(path),
+        method,
+        status,
+        error_code: code,
+        timed_out: timedOut,
+        duration_ms: Date.now() - startedAt,
+        reason,
+      });
+
+      // RN reports a dead server, a bad tunnel and a body it could not send as
+      // the same opaque rejection, and the message the caller shows is
+      // deliberately vague. Without this there is nothing left to debug with.
+      if (__DEV__ && reason) console.error(`[api] ${method} ${path} failed: ${reason}`);
+    };
 
     let res: Response;
     try {
       res = await fetch(`${BASE}${path}`, {
-        method: options?.method ?? 'GET',
+        method,
         headers: {
           ...(token ? { Authorization: `Bearer ${token}` } : null),
-          ...(options?.body !== undefined ? { 'Content-Type': 'application/json' } : null),
+          ...(options?.body !== undefined && !isForm
+            ? { 'Content-Type': 'application/json' }
+            : null),
         },
-        body: options?.body === undefined ? undefined : JSON.stringify(options.body),
+        body:
+          options?.body === undefined
+            ? undefined
+            : isForm
+              ? (options.body as FormData)
+              : JSON.stringify(options.body),
         signal: abort.signal,
       });
-    } catch {
+    } catch (err) {
       // Status 0: the request never reached the API, so there is no HTTP status
       // to report. Both branches surface the root layout's "Can't reach the
       // clinic" retry screen instead of an indefinite splash.
+      const timedOut = abort.signal.aborted;
+      failed(0, timedOut ? 'timeout' : 'unreachable', timedOut, err);
       throw new ApiError(
         0,
-        abort.signal.aborted
-          ? 'The clinic is taking too long to respond'
-          : 'Could not reach the clinic'
+        timedOut ? 'The clinic is taking too long to respond' : 'Could not reach the clinic'
       );
     } finally {
       clearTimeout(timer);
@@ -96,6 +159,7 @@ export function useApiClient() {
 
     const data = await res.json().catch(() => null);
     if (!res.ok) {
+      failed(res.status, data?.code, false);
       throw new ApiError(res.status, data?.error ?? 'Something went wrong', data?.code);
     }
     return data as T;
@@ -116,45 +180,63 @@ export function useApiStream() {
 
   return useCallback(
     async (path: string, body: unknown, onText: (text: string) => void): Promise<string> => {
-      const token = await tokenRef.current();
-      const res = await streamingFetch(`${BASE}${path}`, {
-        method: 'POST',
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : null),
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-      });
+      const startedAt = Date.now();
+      try {
+        return await stream();
+      } catch (err) {
+        // The assistant does not go through `useApiClient`, so without this its
+        // failures are invisible. Never the prompt or the reply — that is the
+        // patient's own words, and they never leave the boundary.
+        Sentry.logger.error('assistant reply failed', {
+          path: logPath(path),
+          status: err instanceof ApiError ? err.status : 0,
+          error_code: err instanceof ApiError ? err.code : 'unreachable',
+          duration_ms: Date.now() - startedAt,
+        });
+        throw err;
+      }
 
-      if (res.headers.get('content-type')?.includes('application/json')) {
-        const data = await res.json().catch(() => null);
-        if (!res.ok) {
-          throw new ApiError(res.status, data?.error ?? 'Something went wrong', data?.code);
+      async function stream(): Promise<string> {
+        const token = await tokenRef.current();
+        const res = await streamingFetch(`${BASE}${path}`, {
+          method: 'POST',
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : null),
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        });
+
+        if (res.headers.get('content-type')?.includes('application/json')) {
+          const data = await res.json().catch(() => null);
+          if (!res.ok) {
+            throw new ApiError(res.status, data?.error ?? 'Something went wrong', data?.code);
+          }
+          // The body is the other side of a network boundary, not a guarantee:
+          // a proxy error page with a JSON content-type must not reach `.content`.
+          if (typeof data?.message?.content !== 'string' || typeof data?.conversationId !== 'string') {
+            throw new ApiError(res.status, 'The assistant sent back an unreadable reply');
+          }
+          onText(data.message.content);
+          return data.conversationId;
         }
-        // The body is the other side of a network boundary, not a guarantee:
-        // a proxy error page with a JSON content-type must not reach `.content`.
-        if (typeof data?.message?.content !== 'string' || typeof data?.conversationId !== 'string') {
+
+        const conversationId = res.headers.get('X-Conversation-Id');
+        if (!res.body || !conversationId) {
           throw new ApiError(res.status, 'The assistant sent back an unreadable reply');
         }
-        onText(data.message.content);
-        return data.conversationId;
-      }
 
-      const conversationId = res.headers.get('X-Conversation-Id');
-      if (!res.body || !conversationId) {
-        throw new ApiError(res.status, 'The assistant sent back an unreadable reply');
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let text = '';
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          text += decoder.decode(value, { stream: true });
+          onText(text);
+        }
+        return conversationId;
       }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let text = '';
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        text += decoder.decode(value, { stream: true });
-        onText(text);
-      }
-      return conversationId;
     },
     [tokenRef]
   );
@@ -297,6 +379,8 @@ export type Appointment = {
   dentist: Dentist | null;
   service: { id: string; key: string; name: string; durationMinutes: number; isTeleconsult: boolean } | null;
   notes?: { id: string; body: string; createdAt: string }[];
+  /** X-rays and documents the patient attached while booking. Signed, expiring. */
+  attachments?: { id: string; thumb: string; full: string }[];
 };
 
 // --- Who am I ---------------------------------------------------------------

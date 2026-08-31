@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/nextjs';
 import { ZodError } from 'zod';
 
 /** Thrown anywhere below a route handler; `route()` turns it into a response. */
@@ -48,7 +49,15 @@ export function route<Args extends unknown[]>(
           { status: 400 }
         );
       }
-      // Never echo the raw error: it can carry query text, and query text can carry PHI.
+      // This catch is why Sentry sees anything server-side at all: `route()`
+      // wraps every API handler, so `onRequestError` never gets a look in.
+      //
+      // ponytail: the raw error goes up as-is. A Postgres error can quote the
+      // row that violated a constraint, so a patient name can ride along in a
+      // message. Add a `beforeSend` scrubber if that ever shows up in an issue.
+      Sentry.captureException(err);
+      // Never echo the raw error to the client: it can carry query text, and
+      // query text can carry PHI.
       console.error('[api] unhandled error', err instanceof Error ? err.message : err);
       return Response.json({ error: 'Something went wrong' }, { status: 500 });
     }

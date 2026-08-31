@@ -3,7 +3,8 @@ import '../global.css';
 import { ClerkProvider, useAuth } from '@clerk/expo';
 import { tokenCache } from '@clerk/expo/token-cache';
 import * as Sentry from '@sentry/react-native';
-import { DefaultTheme, Stack, ThemeProvider } from 'expo-router';
+import { DefaultTheme, Stack, ThemeProvider, useNavigationContainerRef } from 'expo-router';
+import { useEffect } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -11,10 +12,43 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { MeProvider, useMe } from '@/lib/api';
 import { StreamProvider } from '@/lib/stream';
 
+// Turns each screen change into a transaction; the fetches and app start that
+// happen under it hang off that transaction as spans. Registered below.
+const navigationIntegration = Sentry.reactNavigationIntegration();
+
 // No DSN (dev, or a checkout without one) leaves the SDK disabled.
 Sentry.init({
   dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
   sendDefaultPii: false,
+  // ponytail: every transaction is sampled. Fine at this traffic — drop it to
+  // ~0.1 (or swap in tracesSampler) once the app has real users.
+  tracesSampleRate: 1.0,
+  // Record every session, and every session that hit an error.
+  replaysSessionSampleRate: 1.0,
+  replaysOnErrorSampleRate: 1.0,
+  integrations: [
+    // Passing this explicitly is what overrides the masking — the SDK adds
+    // `mobileReplayIntegration()` on its own once a replay sample rate is set,
+    // and its defaults mask all three.
+    //
+    // ponytail: unmasked replay records the screen verbatim — a name, a DOB, a
+    // medical history row and a chat thread all land in Sentry as video. That
+    // contradicts the PHI non-negotiable in CLAUDE.md and is only survivable
+    // while the app runs on seeded fake patients (PLAN.md A15). Flip these
+    // three back to `true` — or drop the sample rates to 0 — before any real
+    // patient signs in.
+    Sentry.mobileReplayIntegration({
+      maskAllText: false,
+      maskAllImages: false,
+      maskAllVectors: false,
+    }),
+    navigationIntegration,
+  ],
+  // Structured logs. Deliberately NOT paired with `consoleLoggingIntegration()`
+  // — that would ship every console line to Sentry, which is exactly what
+  // `beforeBreadcrumb` below strips out. Logs are written by hand, at the few
+  // places worth watching in production.
+  enableLogs: true,
   // PHI never leaves the boundary. A console breadcrumb carries whatever was
   // logged, so drop the category wholesale rather than pattern-matching a name,
   // and let an event carry the Clerk id but never an email or a display name.
@@ -23,11 +57,24 @@ Sentry.init({
     if (event.user) event.user = { id: event.user.id };
     return event;
   },
+  // `beforeSend` does not run on logs, and the SDK copies the scope's user onto
+  // every one as `user.id` / `user.email` / `user.name` — a display name is a
+  // patient name. Same reduction, second door.
+  beforeSendLog: (log) => {
+    delete log.attributes?.['user.email'];
+    delete log.attributes?.['user.name'];
+    return log;
+  },
 });
 
 // Light mode only — see the design system. Splash auto-hides because we never
 // call preventAutoHideAsync.
 function RootLayout() {
+  const navigationRef = useNavigationContainerRef();
+  useEffect(() => {
+    if (navigationRef?.current) navigationIntegration.registerNavigationContainer(navigationRef);
+  }, [navigationRef]);
+
   return (
     // GestureHandlerRootView is required by Stream Chat's overlays, and
     // SafeAreaProvider feeds the insets the call UI pads itself with.
@@ -78,6 +125,7 @@ function RootNavigator() {
         <Stack.Screen name="onboarding" />
         <Stack.Screen name="channel/[id]" />
         <Stack.Screen name="call/[id]" />
+        <Stack.Screen name="sentry-test" />
       </Stack.Protected>
     </Stack>
   );
