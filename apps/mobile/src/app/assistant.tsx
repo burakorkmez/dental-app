@@ -8,6 +8,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -19,6 +20,7 @@ import {
 
 import { Button, SHADOW_GLASS, UI } from '@/components/ui';
 import { useApiClient, useApiStream } from '@/lib/api';
+import { pickPhotos, UPLOAD_TIMEOUT_MS } from '@/lib/photo';
 
 /**
  * AI Dental Assistant — design/ai-assistant-design-1.png (empty) and -2.png (chat).
@@ -27,6 +29,12 @@ import { useApiClient, useApiStream } from '@/lib/api';
  * the whole policy: the emergency card is matched server-side BEFORE any model
  * call, no patient record is ever attached, and the outbound call is gated on
  * an explicit deployment approval. This screen renders what it is handed.
+ *
+ * A photo goes to `POST /api/ai/attachments`, which stores it in ImageKit's
+ * private folder and answers with two signed URLs of the same file: a blurred
+ * render for the thread and the full one a tap swaps in. The blur is a
+ * transformation on delivery, not a second upload, and it is not applied here —
+ * nothing on the phone ever holds an unblurred copy it was not asked for.
  */
 
 // screen-local surfaces only; every button comes from '@/components/ui'
@@ -41,6 +49,7 @@ const A = {
   mine: 'rgba(190,229,246,0.80)',
   mineRim: 'rgba(255,255,255,0.80)',
   bullet: '#5CC0EA',
+  veil: 'rgba(10,37,64,0.58)',
 };
 
 const SUGGESTIONS = [
@@ -56,11 +65,16 @@ const CHIPS: { label: string; sf?: SymbolViewProps['name']; img?: number }[] = [
   { label: 'Gum health', img: require('@/assets/images/ic-tooth-fill.png') },
 ];
 
+/** The same stored file, rendered two ways by ImageKit. Both URLs expire. */
+type Photo = { blurred: string; full: string };
+
 type Msg = {
   from: 'me' | 'ai';
   time: string;
   /** Blank-line-separated paragraphs — the prompt asks for two at most. */
   paras: string[];
+  /** Set instead of `paras` on an attachment: a photo goes on its own turn. */
+  photo?: Photo;
 };
 
 /**
@@ -70,7 +84,12 @@ type Msg = {
  */
 let conversationId: string | null = null;
 
-type StoredMsg = { role: 'user' | 'assistant'; content: string; createdAt: string };
+type StoredMsg = {
+  role: 'user' | 'assistant';
+  content: string;
+  image: Photo | null;
+  createdAt: string;
+};
 
 const now = (d = new Date()) =>
   d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
@@ -80,6 +99,7 @@ const toMsg = (m: StoredMsg): Msg => ({
   from: m.role === 'user' ? 'me' : 'ai',
   time: now(new Date(m.createdAt)),
   paras: m.content.split(/\n{2,}/).filter(Boolean),
+  photo: m.image ?? undefined,
 });
 
 function Card({
@@ -158,6 +178,48 @@ function Disclaimer() {
   );
 }
 
+/**
+ * The blur lives in the URL, so revealing is a source swap with nothing to
+ * fetch first — both renders were handed over together. It is a screen against
+ * a shoulder or a scroll-past, not an access control: what actually keeps the
+ * photo private is the folder it sits in and the signature on the URL.
+ */
+function PhotoAttachment({ photo }: { photo: Photo }) {
+  const [revealed, setRevealed] = useState(false);
+
+  return (
+    <Pressable
+      onPress={() => setRevealed((r) => !r)}
+      accessibilityRole="button"
+      accessibilityLabel={revealed ? 'Hide photo' : 'Reveal photo'}
+      style={{ borderRadius: 18, borderCurve: 'continuous', overflow: 'hidden' }}
+    >
+      <Image
+        source={{ uri: revealed ? photo.full : photo.blurred }}
+        style={{ width: 221, height: 221, backgroundColor: '#CFE4F2' }}
+        contentFit="cover"
+        transition={160}
+      />
+      {revealed ? null : (
+        <View
+          className="absolute inset-0 items-center justify-center"
+          style={{ pointerEvents: 'none' }}
+        >
+          <View
+            className="flex-row items-center rounded-[16px] px-[13px] py-[8px]"
+            style={{ backgroundColor: A.veil }}
+          >
+            <SymbolView name="eye" size={15} tintColor="#FFFFFF" />
+            <Text className="ml-[7px] text-[13px] font-semibold" style={{ color: '#FFFFFF' }}>
+              Tap to view
+            </Text>
+          </View>
+        </View>
+      )}
+    </Pressable>
+  );
+}
+
 function MeBubble({ m }: { m: Msg }) {
   return (
     <View className="mb-[20px] flex-row justify-end">
@@ -178,9 +240,13 @@ function MeBubble({ m }: { m: Msg }) {
           SHADOW_GLASS,
         ]}
       >
-        <Text className="text-[13px]" style={{ color: A.body, lineHeight: 19 }}>
-          {m.paras.join('\n\n')}
-        </Text>
+        {m.photo ? (
+          <PhotoAttachment photo={m.photo} />
+        ) : (
+          <Text className="text-[13px]" style={{ color: A.body, lineHeight: 19 }}>
+            {m.paras.join('\n\n')}
+          </Text>
+        )}
         <View className="mt-[6px] flex-row items-center justify-end">
           <Text className="mr-[7px] text-[12.5px]" style={{ color: '#5E93B5' }}>
             {m.time}
@@ -325,6 +391,44 @@ export default function Assistant() {
       );
     } catch (err) {
       setReply(err instanceof Error ? err.message : 'Something went wrong.');
+    } finally {
+      setPending(false);
+    }
+  };
+
+  /**
+   * A photo is a complete turn: the API stores it and answers with its own
+   * canned reply, because the assistant is not allowed to interpret an image
+   * and the image is never sent to the model. So nothing streams here — one
+   * request, both bubbles.
+   */
+  const attach = async () => {
+    if (pending) return;
+
+    setPending(true);
+    try {
+      const [photo] = await pickPhotos();
+      if (!photo) return;
+
+      const form = new FormData();
+      if (conversationId) form.append('conversationId', conversationId);
+      form.append('photo', photo.file);
+
+      const sent = await call<{ conversationId: string; image: Photo; reply: string }>(
+        '/api/ai/attachments',
+        { method: 'POST', body: form, timeoutMs: UPLOAD_TIMEOUT_MS }
+      );
+
+      conversationId = sent.conversationId;
+      setMsgs((m) => [
+        ...m,
+        { from: 'me', paras: [], time: now(), photo: sent.image },
+        { from: 'ai', paras: sent.reply.split(/\n{2,}/).filter(Boolean), time: now() },
+      ]);
+    } catch (err) {
+      // Nothing was added to the thread, so unlike `send` there is no bubble to
+      // write the failure into — a dialog is the only place left for it.
+      Alert.alert('Could not send the photo', err instanceof Error ? err.message : 'Try again.');
     } finally {
       setPending(false);
     }
@@ -481,7 +585,8 @@ export default function Assistant() {
               // Short enough to fit one line at both sizes, down to a 375pt
               // screen: the placeholder has no room to wrap or ellipsize — a
               // multiline input is only as tall as its value, which is empty.
-              placeholder="Ask a dental question"
+              // It lost a word when the attach button took 50pt off the row.
+              placeholder="Ask a question"
               placeholderTextColor={A.muted}
               value={text}
               onChangeText={setText}
@@ -495,6 +600,17 @@ export default function Assistant() {
                 paddingVertical: 0,
                 marginRight: 8,
               }}
+            />
+            <Button
+              label=""
+              variant="glass"
+              height={chatting ? 44 : 48}
+              radius={chatting ? 22 : 24}
+              paddingX={0}
+              leading={<SymbolView name="photo" size={chatting ? 20 : 22} tintColor={A.blue} />}
+              disabled={pending}
+              style={{ width: chatting ? 44 : 48, marginRight: 6 }}
+              onPress={attach}
             />
             <Button
               label=""

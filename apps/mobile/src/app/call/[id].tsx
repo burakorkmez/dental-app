@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/react-native';
 import {
   CallContent,
   CallingState,
@@ -34,11 +35,25 @@ export default function CallScreen() {
     if (!call) return;
     // Ride out a lift or a tunnel instead of ending the consultation.
     call.setDisconnectionTimeout(120);
-    call
-      .join({ create: true })
-      .catch(() =>
-        setError('Could not join the consultation. Check your connection and try again.')
-      );
+    const startedAt = Date.now();
+    call.join({ create: true }).then(
+      () =>
+        Sentry.logger.info('teleconsult joined', {
+          call_type: 'default',
+          join_duration_ms: Date.now() - startedAt,
+        }),
+      (err) => {
+        // A consultation nobody could join is the worst failure this app has —
+        // the patient is sat waiting and the dentist is billing the slot. The
+        // reason is a WebRTC/SFU string, never anything about the patient.
+        Sentry.logger.error('teleconsult join failed', {
+          call_type: 'default',
+          reason: err instanceof Error ? err.message : 'unknown',
+          duration_ms: Date.now() - startedAt,
+        });
+        setError('Could not join the consultation. Check your connection and try again.');
+      }
+    );
 
     return () => {
       // Guarded: CallContent's hangup already left, and leaving twice throws.

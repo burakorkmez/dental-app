@@ -62,6 +62,10 @@ const MENU: { icon: ReactNode; label: string; href?: Href }[] = [
   { icon: icon('bell'), label: 'Notifications', href: '/profile/notifications' },
   { icon: icon('lock.shield'), label: 'Privacy & Data' },
   { icon: icon('headphones'), label: 'Help & Support' },
+  // Dev-only: fires sample errors at Sentry so the dashboard can be checked.
+  ...(__DEV__
+    ? [{ icon: icon('ladybug'), label: 'Sentry Test', href: '/sentry-test' as Href }]
+    : []),
 ];
 
 export default function Profile() {

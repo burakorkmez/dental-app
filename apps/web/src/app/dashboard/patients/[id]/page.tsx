@@ -6,6 +6,7 @@ import { ArrowLeftIcon, ClipboardIcon, ClockIcon, HeartPulseIcon } from '@/compo
 import { Avatar, Card, CardTitle, Chip, EmptyState, Field, LevelMeter, ToggleRow } from '@/components/ui';
 import { db } from '@/db';
 import {
+  appointmentAttachments,
   appointments,
   dentists,
   medicalHistories,
@@ -16,6 +17,7 @@ import {
 } from '@/db/schema';
 import { audit } from '@/lib/audit';
 import { requireStaff } from '@/lib/auth';
+import { signedAttachment } from '@/lib/imagekit';
 import { formatClinicDate, formatClinicTime } from '@/lib/time';
 
 import { AddNoteForm } from './add-note-form';
@@ -66,6 +68,20 @@ export default async function PatientPage({ params }: PageProps<'/dashboard/pati
         .orderBy(desc(visitNotes.createdAt))
     : [];
   const notesFor = (appointmentId: string) => notes.filter((n) => n.appointmentId === appointmentId);
+
+  // What the patient sent ahead of the visit — X-rays, prescriptions, referral
+  // letters. Scoped to this patient's appointments for the same reason as the
+  // notes above. URLs are signed here and expire; the files are private.
+  const files = visits.length
+    ? await db
+        .select()
+        .from(appointmentAttachments)
+        .where(inArray(appointmentAttachments.appointmentId, visits.map((v) => v.id)))
+    : [];
+  const filesFor = (appointmentId: string) =>
+    files
+      .filter((f) => f.appointmentId === appointmentId)
+      .map((f) => ({ id: f.id, ...signedAttachment(f.path) }));
 
   const initials = `${patient.firstName[0] ?? ''}${patient.lastName[0] ?? ''}`.toUpperCase();
   const meta = [
@@ -175,6 +191,27 @@ export default async function PatientPage({ params }: PageProps<'/dashboard/pati
                     {v.status === 'booked' && <CompleteButton appointmentId={v.id} />}
                   </span>
                 </div>
+
+                {filesFor(v.id).length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {filesFor(v.id).map((f) => (
+                      <a
+                        key={f.id}
+                        href={f.full}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Patient upload — open full size"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={f.thumb}
+                          alt="Patient upload"
+                          className="h-24 w-24 rounded-[14px] border border-hairline object-cover transition-transform hover:scale-[1.03]"
+                        />
+                      </a>
+                    ))}
+                  </div>
+                )}
 
                 {notesFor(v.id).map((n) => (
                   <p

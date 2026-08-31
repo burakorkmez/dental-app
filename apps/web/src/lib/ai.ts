@@ -71,6 +71,16 @@ For a knocked-out tooth or a jaw injury, call the clinic immediately — these a
 
 I am not able to assess an emergency, so please do not wait on this conversation.`;
 
+/**
+ * The reply to a photo. Hard-coded and never generated, for the same reason the
+ * emergency card is: the system prompt forbids interpreting an image, and a
+ * model asked to answer a turn it cannot see will invent something. The photo
+ * itself never reaches OpenAI — it is stored and shown in the thread only.
+ */
+export const PHOTO_REPLY = `Thanks for the photo. I am not able to look at it — reading a photo, an X-ray or a scan is a dentist's job, and I would only be guessing.
+
+If you describe what you are noticing in words — where it is, how long it has been there, and what makes it worse — I can explain the general possibilities. Would you like to book an appointment so someone can look at it properly?`;
+
 /** Shown when the model streams nothing usable back. */
 export const AI_FALLBACK_REPLY =
   'Sorry, I could not answer that. Would you like to book an appointment instead?';

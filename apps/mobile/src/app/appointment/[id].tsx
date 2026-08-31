@@ -2,7 +2,7 @@ import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 
 import {
   Button,
@@ -29,6 +29,8 @@ export default function AppointmentDetail() {
     `/api/appointments/${id}`
   );
   const [busy, setBusy] = useState(false);
+  /** The attachment being viewed full-screen, by signed URL. */
+  const [viewing, setViewing] = useState<string | null>(null);
   const a = data?.appointment;
 
   const cancel = () =>
@@ -130,6 +132,23 @@ export default function AppointmentDetail() {
               </>
             ) : null}
 
+            {a.attachments?.length ? (
+              <>
+                <SectionLabel style={{ marginTop: 28 }}>Images you shared</SectionLabel>
+                <View className="mt-[10px] flex-row flex-wrap" style={{ gap: 10 }}>
+                  {a.attachments.map((f) => (
+                    <Pressable key={f.id} onPress={() => setViewing(f.full)}>
+                      <Image
+                        source={{ uri: f.thumb }}
+                        style={{ width: 92, height: 92, borderRadius: 16 }}
+                        contentFit="cover"
+                      />
+                    </Pressable>
+                  ))}
+                </View>
+              </>
+            ) : null}
+
             {a.canJoin ? (
               <View className="mt-[28px]">
                 <Button
@@ -168,6 +187,25 @@ export default function AppointmentDetail() {
           </>
         )}
       </ScrollView>
+
+      <Modal
+        visible={viewing !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setViewing(null)}
+      >
+        <Pressable
+          className="flex-1 items-center justify-center px-[16px]"
+          style={{ backgroundColor: 'rgba(10,37,64,0.72)' }}
+          onPress={() => setViewing(null)}
+        >
+          <Image
+            source={{ uri: viewing ?? '' }}
+            style={{ width: '100%', height: '72%' }}
+            contentFit="contain"
+          />
+        </Pressable>
+      </Modal>
     </View>
   );
 }

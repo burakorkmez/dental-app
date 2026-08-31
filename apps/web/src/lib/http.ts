@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/nextjs';
 import { ZodError } from 'zod';
 
 /** Thrown anywhere below a route handler; `route()` turns it into a response. */
@@ -24,8 +25,21 @@ export function isExclusionViolation(err: unknown): boolean {
   return code === '23P01';
 }
 
+/**
+ * Drizzle throws `Failed query: <sql>\nparams: <bound values>` — and the bound
+ * values are patient rows. Keep the SQL, which is the half that identifies the
+ * bug, and drop the values. Used on both sinks an error reaches: the Sentry
+ * event (`sentry.server.config.ts`) and the log line below.
+ */
+export function scrubQuery(message: string): string {
+  return message.replace(/\nparams: [\s\S]*/, '\nparams: [scrubbed]');
+}
+
 export function json(data: unknown, status = 200) {
-  return Response.json(data, { status });
+  // Every response from this helper is scoped to the caller — a patient's own
+  // records, and signed attachment URLs that are identity-specific and expire.
+  // Nothing here is shared, so nothing here is cacheable.
+  return Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
 }
 
 /**
@@ -48,8 +62,19 @@ export function route<Args extends unknown[]>(
           { status: 400 }
         );
       }
-      // Never echo the raw error: it can carry query text, and query text can carry PHI.
-      console.error('[api] unhandled error', err instanceof Error ? err.message : err);
+      // This catch is why Sentry sees anything server-side at all: `route()`
+      // wraps every API handler, so `onRequestError` never gets a look in.
+      //
+      // The `beforeSend` in `sentry.server.config.ts` scrubs the bound
+      // parameters off the message before this leaves the process.
+      Sentry.captureException(err);
+      // Never echo the raw error to the client: it can carry query text, and
+      // query text can carry PHI. The log line is inside the boundary but still
+      // gets the same scrub — a log sink is one export away from not being.
+      console.error(
+        '[api] unhandled error',
+        err instanceof Error ? scrubQuery(err.message) : err
+      );
       return Response.json({ error: 'Something went wrong' }, { status: 500 });
     }
   };

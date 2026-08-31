@@ -182,6 +182,27 @@ export const appointments = pgTable(
   ]
 );
 
+/**
+ * X-rays, prescriptions and referral letters the patient attaches while
+ * booking, so the dentist can read them before the chair.
+ *
+ * PHI, so the same rule as `ai_messages.image_path`: the file lives in a
+ * PRIVATE ImageKit folder and only its path is stored. Delivery URLs expire,
+ * so they are signed on every read and never written down.
+ */
+export const appointmentAttachments = pgTable(
+  'appointment_attachments',
+  {
+    id: id(),
+    appointmentId: uuid('appointment_id')
+      .notNull()
+      .references(() => appointments.id, { onDelete: 'cascade' }),
+    path: text('path').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('appointment_attachments_appointment_idx').on(t.appointmentId)]
+);
+
 /** Post-op instructions. Patient-readable. */
 export const visitNotes = pgTable('visit_notes', {
   id: id(),
@@ -210,6 +231,12 @@ export const aiMessages = pgTable(
       .references(() => aiConversations.id, { onDelete: 'cascade' }),
     role: aiRoleEnum('role').notNull(),
     content: text('content').notNull(),
+    /**
+     * ImageKit path of a photo the patient attached, private folder. Delivery
+     * URLs are never stored — they expire, so they are signed on every read.
+     * A photo message carries an empty `content`.
+     */
+    imagePath: text('image_path'),
     createdAt: createdAt(),
   },
   (t) => [index('ai_messages_conversation_idx').on(t.conversationId, t.createdAt)]

@@ -114,7 +114,8 @@ appointments         patient_id, dentist_id, service_id, starts_at, ends_at,
                         tstzrange(starts_at, ends_at) WITH &&) WHERE status='booked'
 
 visit_notes          appointment_id, body, created_by → users   [post-op, patient-readable]
-attachments          imagekit_file_id, patient_id, uploaded_by, context, created_at
+appointment_attachments  appointment_id, path, created_at   [booking uploads —
+                     X-rays, prescriptions; private ImageKit folder, path only]
 ai_conversations     user_id  →  ai_messages(role, content, created_at)
 push_tokens          user_id, expo_push_token, updated_at
 audit_log            actor_user_id, action, entity, entity_id, at
@@ -156,11 +157,11 @@ Expo app ──Clerk session token──> Next.js Route Handlers ──Drizzle�
    │                                      │
    │                                      ├──> OpenAI (gpt-4o-mini)   AI assistant
    │                                      ├──> Stream (server SDK)    call/chat tokens
-   │                                      ├──> ImageKit               signed upload auth
+   │                                      ├──> ImageKit               upload + signed URLs
    │                                      └──> Expo Push API          reminders
    │
    └──direct──> Stream Video / Stream Chat (client SDKs, server-issued tokens)
-                ImageKit (direct upload with server-signed params)
+                (ImageKit uploads go through the API, not direct — D19)
 
 Webhooks IN:  Clerk user.created/updated/deleted → sync users table
 Vercel Cron:  */15 * * * *  →  /api/cron/reminders
@@ -348,6 +349,8 @@ lands before everything that depends on it.
 ### Phase 5 — Booking UX ✅ (mobile flow + appointment detail with cancel; staff schedule ✅)
 - Mobile: service picker → dentist picker → calendar with real slots → confirm → detail
   screen with cancel/reschedule.
+- Confirm step takes optional X-rays / documents (`appointment_attachments`, see D20).
+  Staff see them on the patient's visit timeline, patients on the appointment detail.
 - Web dashboard: day and week views across dentists, click-through to the patient record
   (intake, medical history, visit timeline), manual block-out and cancel.
 
@@ -380,6 +383,12 @@ lands before everything that depends on it.
 - Emergency keyword check runs **before** the model call and returns the hard-coded card.
 - System prompt: education only, no diagnosis, no dosages, always offer to book.
 - Persistent disclaimer in the chat UI header.
+- Photo attachments: `POST /api/ai/attachments` uploads to ImageKit's **private**
+  `/patient-uploads/ai/{userId}` folder and returns two signed, expiring URLs of the one
+  stored file — a `w-400,bl-40` blurred render for the thread and `w-1200` for the reveal.
+  **The photo is never sent to OpenAI**: the reply is the hard-coded `PHOTO_REPLY`, chosen
+  before any model call, and photo turns are dropped from the history the model sees.
+  Clearing history deletes the patient's ImageKit folder along with the rows.
 
 ### Phase 9 — Visit history & post-op notes ✅ (patient timeline = Past tab → appointment detail)
 - Patient timeline of past appointments with their `visit_notes`.
@@ -431,6 +440,8 @@ Recorded here because §4 above is now partly built and these differ from what i
 | D16 | **Ringing calls, foreground only for now.** `getOrCreate({ ring: true })` with a fresh UUID per call; a root-level `useCalls()` watcher renders the incoming/outgoing UI over any screen. | Ringing over the socket needs no credentials and is fully demoable today. Push (APNs VoIP + FCM) is a credentials task, not a code task, and installing the Firebase plugins without those files breaks `expo prebuild`. Runbook: `apps/mobile/RINGING-PUSH.md`. |
 | D17 | **Chat photo attachments use Stream's upload, not ImageKit.** | Stream already holds the message body, and it is on the same BAA list, so routing the image elsewhere buys nothing in v1 while costing a custom upload handler. Revisit with the rest of the ImageKit work — the signed-URL requirement in §1 still stands for clinical photos. |
 | D18 | **The Stream API key is served by `POST /api/stream/token`, not `EXPO_PUBLIC_STREAM_API_KEY`.** | The app already has to call that endpoint for a token, so shipping the key in the bundle adds a second place to rotate it and nothing else. The var is gone from `apps/mobile/.env.example`. |
+| D19 | **Assistant photos upload *through* `/api/ai/attachments`, not direct-to-ImageKit with signed params** — reversing the "direct upload" arrow in §1. | ImageKit's client-upload signature authorises *an* upload, not a destination: `folder`, `isPrivateFile` and the filename all ride in the client's own request. Any signed-in patient could therefore write a public file anywhere in the media library, including over `/dentists`. Proxying is also the shorter path — one endpoint and one round trip instead of an auth call, an upload and an attach. Cost is the 4.5MB Vercel body limit, which the app stays under by resizing to 1400px/JPEG-0.7 first. |
+| D20 | **Booking uploads are `appointment_attachments(appointment_id, path)`** — narrower than §1's sketched `attachments(imagekit_file_id, patient_id, uploaded_by, context)`. Uploaded after the booking commits, one request per file, through `POST /api/appointments/{id}/attachments` (D19's reasoning applies unchanged). Every delivery URL carries a `Dentify` text-layer overlay, top-right. | `context` and `uploaded_by` are a generic attachment table's columns; the only thing that attaches anything in v1 is a patient booking an appointment, and the appointment already carries who and why. Uploading after the insert means no orphan files and no client-supplied storage path for the server to trust. The overlay is a delivery transformation, so a screenshotted or forwarded X-ray still says where it came from, and there is no branded second copy to store. |
 
 
 ## 5. Verification

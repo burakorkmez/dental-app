@@ -1,8 +1,9 @@
 import { and, eq, inArray } from 'drizzle-orm';
 
 import { db } from '@/db';
-import { appointments, dentists, patients, services, visitNotes } from '@/db/schema';
+import { appointmentAttachments, appointments, dentists, patients, services, visitNotes } from '@/db/schema';
 import { requireAuth } from '@/lib/auth';
+import { signedAttachment } from '@/lib/imagekit';
 import { badRequest, conflict, forbidden, isExclusionViolation, json, notFound, route } from '@/lib/http';
 import { canCancel } from '@/lib/scheduling';
 import { serialize } from '@/lib/appointments';
@@ -62,10 +63,18 @@ export const GET = route(async (_req: Request, ctx: Ctx) => {
     .from(visitNotes)
     .where(eq(visitNotes.appointmentId, row.appointment.id));
 
+  // Signed per read, because the delivery URLs expire — the stored file is
+  // private and unreachable without them.
+  const files = await db
+    .select()
+    .from(appointmentAttachments)
+    .where(eq(appointmentAttachments.appointmentId, row.appointment.id));
+
   return json({
     appointment: {
       ...serialize(row),
       notes: notes.map((n) => ({ id: n.id, body: n.body, createdAt: n.createdAt.toISOString() })),
+      attachments: files.map((f) => ({ id: f.id, ...signedAttachment(f.path) })),
     },
   });
 });

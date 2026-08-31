@@ -1,4 +1,5 @@
-import { and, asc, desc, eq } from 'drizzle-orm';
+import * as Sentry from '@sentry/nextjs';
+import { asc, desc, eq } from 'drizzle-orm';
 import OpenAI from 'openai';
 
 import { db } from '@/db';
@@ -11,8 +12,10 @@ import {
   replyStream,
   SYSTEM_PROMPT,
 } from '@/lib/ai';
+import { getOrCreateConversation } from '@/lib/ai-thread';
 import { requireAuth } from '@/lib/auth';
-import { ApiError, json, notFound, route } from '@/lib/http';
+import { imagekit, photoFolder, signedPhoto } from '@/lib/imagekit';
+import { ApiError, json, route } from '@/lib/http';
 import { aiChatSchema } from '@/lib/validation';
 
 /**
@@ -22,23 +25,30 @@ import { aiChatSchema } from '@/lib/validation';
  * Nothing else — no record is ever attached. But the messages are patient-typed
  * free text, so they may still carry identifiers; see lib/ai.ts. The outbound
  * call is gated on an explicit deployment approval and fails closed.
+ *
+ * That same free text also goes to Sentry, as the input/output of the gen_ai
+ * span — that is what Sentry's Conversations view replays. It is the identical
+ * bet the mobile app makes with unmasked session replay, and it holds only
+ * while PLAN.md A15 does (seeded fake patients). Before a real patient signs
+ * in, set `dataCollection: { genAI: { inputs: false, outputs: false } }` in
+ * sentry.server.config.ts; tokens, cost, latency and errors all survive that,
+ * only the replayed chat goes away.
  */
 export const POST = route(async (req: Request) => {
   const user = await requireAuth();
   const body = aiChatSchema.parse(await req.json());
 
-  const conversation = body.conversationId
-    ? (
-        await db
-          .select()
-          .from(aiConversations)
-          .where(
-            and(eq(aiConversations.id, body.conversationId), eq(aiConversations.userId, user.id))
-          )
-      )[0]
-    : (await db.insert(aiConversations).values({ userId: user.id }).returning())[0];
+  const conversation = await getOrCreateConversation(user.id, body.conversationId);
 
-  if (!conversation) throw notFound('Conversation not found');
+  // Agent tracing. Both are scoped to this request, and both have to be set
+  // before the model call below or the span is orphaned.
+  //
+  // The thread id doubles as the conversation id, so every turn of one chat
+  // lands in a single Sentry conversation across separate requests and traces.
+  // The user is id-only on purpose: a patient's email is an identifier, and
+  // the User column only needs something stable to group by.
+  Sentry.setUser({ id: user.id });
+  Sentry.setConversationId(conversation.id);
 
   await db.insert(aiMessages).values({
     conversationId: conversation.id,
@@ -76,14 +86,27 @@ export const POST = route(async (req: Request) => {
     );
   }
 
-  const history = await db
-    .select({ role: aiMessages.role, content: aiMessages.content })
-    .from(aiMessages)
-    .where(eq(aiMessages.conversationId, conversation.id))
-    .orderBy(asc(aiMessages.createdAt))
-    .limit(30);
+  const history = (
+    await db
+      .select({ role: aiMessages.role, content: aiMessages.content })
+      .from(aiMessages)
+      .where(eq(aiMessages.conversationId, conversation.id))
+      .orderBy(asc(aiMessages.createdAt))
+      .limit(30)
+    // A photo turn is stored with empty content — the image never goes to
+    // OpenAI, and a blank turn in the prompt is worse than no turn at all.
+  ).filter((m) => m.content.trim());
 
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  // The wrapper is what produces the gen_ai span — model, tokens, cost,
+  // latency, and (because `dataCollection` is set in sentry.server.config.ts)
+  // the prompt and the reply.
+  //
+  // ponytail: `openai@7` is past the range Sentry documents as supported
+  // (>=4 <7); the wrapper only touches `chat.completions.create`, which has
+  // not changed, and spans were verified landing. Recheck on an openai major.
+  const openai = Sentry.instrumentOpenAiClient(
+    new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  );
   const completion = await openai.chat.completions.create({
     model: AI_MODEL,
     messages: [
@@ -93,6 +116,9 @@ export const POST = route(async (req: Request) => {
     max_tokens: 400,
     temperature: 0.3,
     stream: true,
+    // OpenAI omits token counts from streamed responses unless asked. Without
+    // this the gen_ai span has no usage, and so no cost estimate.
+    stream_options: { include_usage: true },
   });
 
   // The answer streams as it is generated. Every branch above this line stays
@@ -138,6 +164,9 @@ export const GET = route(async () => {
       id: m.id,
       role: m.role,
       content: m.content,
+      // Signed fresh on every read rather than stored: a delivery URL for a
+      // private file expires, so a persisted one would be a dead link.
+      image: m.imagePath ? signedPhoto(m.imagePath) : null,
       createdAt: m.createdAt.toISOString(),
     })),
   });
@@ -147,5 +176,20 @@ export const GET = route(async () => {
 export const DELETE = route(async () => {
   const user = await requireAuth();
   await db.delete(aiConversations).where(eq(aiConversations.userId, user.id));
+
+  // Dropping the rows would otherwise leave the photos themselves sitting in
+  // ImageKit with nothing left pointing at them — deleted to the patient,
+  // retained by us. One folder per user is what makes this a single call.
+  //
+  // Best-effort on purpose: the rows are already gone, and failing the request
+  // now would tell the patient the delete did not happen when most of it did.
+  try {
+    await imagekit().deleteFolder(photoFolder(user.id));
+  } catch (err) {
+    // 404 is the normal case — a patient who never attached a photo has no
+    // folder. Anything else is a real orphan worth knowing about.
+    console.error('[ai] photo folder cleanup failed', err instanceof Error ? err.message : err);
+  }
+
   return json({ ok: true });
 });
