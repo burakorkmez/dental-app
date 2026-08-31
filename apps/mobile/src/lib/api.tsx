@@ -24,6 +24,16 @@ import {
 
 const BASE = process.env.EXPO_PUBLIC_API_URL;
 
+/**
+ * A request that never settles is worse than one that fails. The root layout
+ * holds the splash while `useMe()` is loading, so a hung fetch renders a black
+ * screen with no way out and no error to show. React Native's fetch has no
+ * default timeout, so the bound has to live here — every screen goes through
+ * this one function, which is why the guard belongs in it rather than in each
+ * caller.
+ */
+const REQUEST_TIMEOUT_MS = 15_000;
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -55,14 +65,34 @@ export function useApiClient() {
 
   return useCallback(async <T,>(path: string, options?: Options): Promise<T> => {
     const token = await tokenRef.current();
-    const res = await fetch(`${BASE}${path}`, {
-      method: options?.method ?? 'GET',
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : null),
-        ...(options?.body !== undefined ? { 'Content-Type': 'application/json' } : null),
-      },
-      body: options?.body === undefined ? undefined : JSON.stringify(options.body),
-    });
+
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
+
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}${path}`, {
+        method: options?.method ?? 'GET',
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : null),
+          ...(options?.body !== undefined ? { 'Content-Type': 'application/json' } : null),
+        },
+        body: options?.body === undefined ? undefined : JSON.stringify(options.body),
+        signal: abort.signal,
+      });
+    } catch {
+      // Status 0: the request never reached the API, so there is no HTTP status
+      // to report. Both branches surface the root layout's "Can't reach the
+      // clinic" retry screen instead of an indefinite splash.
+      throw new ApiError(
+        0,
+        abort.signal.aborted
+          ? 'The clinic is taking too long to respond'
+          : 'Could not reach the clinic'
+      );
+    } finally {
+      clearTimeout(timer);
+    }
 
     const data = await res.json().catch(() => null);
     if (!res.ok) {
