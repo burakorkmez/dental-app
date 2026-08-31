@@ -48,6 +48,16 @@ type StreamSession = {
   token: string;
 };
 
+/**
+ * How long to wait for Stream before giving up and running without it.
+ * Neither wait below is self-limiting — `fetch` has no timeout, and
+ * `useCreateChatClient` retries a failing connection indefinitely — so without
+ * this the whole app sits behind a spinner whenever the API or Stream is
+ * unreachable. Messaging is a feature; booking and the assistant are not
+ * allowed to die with it.
+ */
+const CONNECT_TIMEOUT_MS = 12_000;
+
 /** The patient's one conversation with the clinic, plus who to ring. */
 type Clinic = { channelId: string | null; memberIds: string[] };
 
@@ -157,18 +167,40 @@ export function StreamProvider({ children }: { children: ReactNode }) {
     };
   }, [call, isLoaded, isSignedIn]);
 
+  // Stage 1 deadline: the token POST. Stops once a session lands.
+  useEffect(() => {
+    if (!isSignedIn || failed || session) return;
+    const timer = setTimeout(() => setFailed(true), CONNECT_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [isSignedIn, failed, session]);
+
+  // Stage 2 deadline, owned by ConnectedStream: the chat socket.
+  const giveUp = useCallback(() => setFailed(true), []);
+
   if (!isLoaded) return <Connecting />;
   if (!isSignedIn || failed) return <>{children}</>;
   if (!session) return <Connecting />;
 
-  return <ConnectedStream session={session}>{children}</ConnectedStream>;
+  return (
+    <ConnectedStream session={session} onUnavailable={giveUp}>
+      {children}
+    </ConnectedStream>
+  );
 }
 
 /**
  * Both clients live here, so signing out unmounts this component and
  * disconnects them together before the next user's are built.
  */
-function ConnectedStream({ session, children }: { session: StreamSession; children: ReactNode }) {
+function ConnectedStream({
+  session,
+  onUnavailable,
+  children,
+}: {
+  session: StreamSession;
+  onUnavailable: () => void;
+  children: ReactNode;
+}) {
   const call = useApiClient();
   const { me } = useMe();
   const { top, right, bottom, left } = useSafeAreaInsets();
@@ -229,6 +261,14 @@ function ConnectedStream({ session, children }: { session: StreamSession; childr
       cancelled = true;
     };
   }, [call, wantsChannel]);
+
+  // Stream is up but the socket never opened. Hand back to the parent, which
+  // renders the app un-wrapped so every non-Stream screen still works.
+  useEffect(() => {
+    if (chatClient) return;
+    const timer = setTimeout(onUnavailable, CONNECT_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [chatClient, onUnavailable]);
 
   if (!chatClient) return <Connecting />;
 
