@@ -60,8 +60,12 @@ export default function BookingConfirm() {
 
   const addPhotos = async () => {
     if (busy) return;
-    const picked = await pickPhotos(MAX_ATTACHMENTS - photos.length);
-    if (picked.length) setPhotos((v) => [...v, ...picked]);
+    try {
+      const picked = await pickPhotos(MAX_ATTACHMENTS - photos.length);
+      if (picked.length) setPhotos((v) => [...v, ...picked]);
+    } catch (err) {
+      Alert.alert('Could not add that photo', err instanceof Error ? err.message : 'Try again.');
+    }
   };
 
   /**
@@ -241,10 +245,10 @@ export default function BookingConfirm() {
         </View>
 
         <View className="mt-[24px]">
-          <SectionRow label="X-rays or documents" />
+          <SectionRow label="X-rays or photos" />
           <Text className="mt-[6px] text-[15px]" style={{ color: B.sub, lineHeight: 21 }}>
-            Optional. Anything that helps your dentist prepare — a recent X-ray, a
-            prescription, a referral letter.
+            Optional. Photos that help your dentist prepare — a recent X-ray, or a
+            picture of the tooth that is bothering you.
           </Text>
 
           <View className="mt-[14px] flex-row flex-wrap" style={{ gap: 10 }}>

@@ -118,7 +118,10 @@ export default function BookingTime() {
                 <Pressable
                   key={d?.id ?? 'any'}
                   onPress={() => {
-                    // A different dentist means a different set of times.
+                    // A different dentist means a different set of times. The
+                    // same one means nothing changed, so the slot they already
+                    // picked survives the tap.
+                    if (on) return;
                     setDentistId(d?.id ?? null);
                     setPicked(null);
                   }}

@@ -28,10 +28,12 @@ export async function pickPhotos(limit = 1): Promise<PickedPhoto[]> {
   // photo is never upscaled into a bigger file than it started as.
   return Promise.all(
     picked.assets.map(async (asset) => {
-      const rendered = await ImageManipulator.manipulate(asset.uri)
-        .resize({ width: Math.min(MAX_UPLOAD_WIDTH, asset.width || MAX_UPLOAD_WIDTH) })
-        .renderAsync();
-      const jpeg = await rendered.saveAsync({ compress: 0.7, format: SaveFormat.JPEG });
+      // The resize is an optimisation, not a gate: a format the manipulator
+      // chokes on should still upload. The server caps size and rejects a type
+      // it cannot store, and both callers already surface that as an error the
+      // patient can read — better than the pick rejecting and the button
+      // looking dead.
+      const jpeg = await shrink(asset).catch(() => ({ uri: asset.uri }));
 
       // NOT React Native's `{ uri, name, type }` descriptor: `fetch` here is
       // Expo's, which builds the multipart body in JS and can only read a part
@@ -41,4 +43,11 @@ export async function pickPhotos(limit = 1): Promise<PickedPhoto[]> {
       return { uri: jpeg.uri, file: new File(jpeg.uri) };
     })
   );
+}
+
+async function shrink(asset: ImagePicker.ImagePickerAsset) {
+  const rendered = await ImageManipulator.manipulate(asset.uri)
+    .resize({ width: Math.min(MAX_UPLOAD_WIDTH, asset.width || MAX_UPLOAD_WIDTH) })
+    .renderAsync();
+  return rendered.saveAsync({ compress: 0.7, format: SaveFormat.JPEG });
 }

@@ -125,6 +125,15 @@ function RootNavigator() {
         <Stack.Screen name="onboarding" />
         <Stack.Screen name="channel/[id]" />
         <Stack.Screen name="call/[id]" />
+      </Stack.Protected>
+      {/*
+        A deep link resolves any file under `app/`, declared here or not — so
+        dropping the <Stack.Screen> would not have kept `dentify://sentry-test`
+        from opening a crash harness in a release build. `Stack.Protected` is
+        what actually removes the route. The Profile entry point has its own
+        `__DEV__` guard; this is the one that holds when that is bypassed.
+      */}
+      <Stack.Protected guard={isSignedIn && __DEV__}>
         <Stack.Screen name="sentry-test" />
       </Stack.Protected>
     </Stack>

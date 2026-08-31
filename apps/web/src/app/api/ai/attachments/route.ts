@@ -20,13 +20,17 @@ export const POST = route(async (req: Request) => {
   const user = await requireAuth();
 
   const form = await req.formData().catch(() => null);
-  const path = await uploadPrivateImage(form?.get('photo'), photoFolder(user.id));
 
+  // Conversation first: `getOrCreateConversation` is what enforces that the id
+  // belongs to this user, and it throws when it does not. Uploading before that
+  // check leaves a private file in ImageKit that no row will ever reference.
   const conversationId = form?.get('conversationId');
   const conversation = await getOrCreateConversation(
     user.id,
     typeof conversationId === 'string' && conversationId ? conversationId : undefined
   );
+
+  const path = await uploadPrivateImage(form?.get('photo'), photoFolder(user.id));
 
   // Empty content on purpose: it is the column the model reads as the patient's
   // turn, and there is no text here. ../chat/route.ts drops blank turns from the

@@ -405,11 +405,11 @@ export default function Assistant() {
   const attach = async () => {
     if (pending) return;
 
-    const [photo] = await pickPhotos();
-    if (!photo) return;
-
     setPending(true);
     try {
+      const [photo] = await pickPhotos();
+      if (!photo) return;
+
       const form = new FormData();
       if (conversationId) form.append('conversationId', conversationId);
       form.append('photo', photo.file);
