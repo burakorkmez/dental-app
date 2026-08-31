@@ -13,6 +13,8 @@
     "db:generate": "npm run db:generate -w apps/web",
     "db:migrate": "npm run db:migrate -w apps/web",
     "db:seed": "npm run db:seed -w apps/web",
+    "db:seed:stream": "npm run db:seed:stream -w apps/web",
+    "stream:check": "npm run stream:check -w apps/web",
     "db:studio": "npm run db:studio -w apps/web"
   },
   "engines": {

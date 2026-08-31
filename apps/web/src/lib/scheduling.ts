@@ -12,6 +12,9 @@ export const SLOT_GRANULARITY_MINUTES = 15;
 export const MIN_LEAD_TIME_MINUTES = 120;
 /** PLAN.md — cancel/reschedule closes this far ahead of the appointment. */
 export const CANCEL_CUTOFF_HOURS = 24;
+/** PLAN.md A7 — the teleconsult join window around `starts_at`. */
+export const JOIN_OPENS_BEFORE_MINUTES = 5;
+export const JOIN_CLOSES_AFTER_MINUTES = 30;
 
 const MINUTE = 60_000;
 
@@ -120,6 +123,23 @@ export function availableSlots({
 /** Server-side rule. The client only hides the button; this decides. */
 export function canCancel(startsAt: Date, now: Date): boolean {
   return startsAt.getTime() - now.getTime() >= CANCEL_CUTOFF_HOURS * 60 * MINUTE;
+}
+
+/**
+ * PLAN.md A7 — a teleconsult is joinable from 5 minutes before until 30 minutes
+ * after its start. Computed here, next to `canCancel`, so both windows are one
+ * pure function the tests can pin rather than a date comparison scattered
+ * across screens.
+ *
+ * ponytail: this gates the button, not the room. A determined caller who
+ * already holds a Stream token could still join `appointment-{id}` outside the
+ * window. Closing that means server-side call membership (create the call with
+ * only the patient + dentist as members and set the call type to members-only)
+ * — worth doing before real patients, overkill for the seeded demo (A15).
+ */
+export function canJoinCall(startsAt: Date, now: Date): boolean {
+  const delta = now.getTime() - startsAt.getTime();
+  return delta >= -JOIN_OPENS_BEFORE_MINUTES * MINUTE && delta <= JOIN_CLOSES_AFTER_MINUTES * MINUTE;
 }
 
 export type SlotVerdict = 'ok' | 'taken' | 'invalid';

@@ -2,10 +2,12 @@ import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useAvatar } from '@/components/ui';
 import { useApi, useMe, type Appointment } from '@/lib/api';
+import { useClinic, useRingCall } from '@/lib/stream';
 
 const C = {
   page: '#EDF6FE',
@@ -33,11 +35,11 @@ const CARD_SHADOW = {
 } as const;
 
 const ACTIONS = [
-  { label: 'Book Appointment', href: '/booking/date' as const, img: require('@/assets/images/qa-book.png') },
-  { label: 'Message Clinic', img: require('@/assets/images/qa-message.png') },
-  { label: 'Video Consult', img: require('@/assets/images/qa-video.png') },
-  { label: 'AI Assistant', href: '/assistant' as const, img: require('@/assets/images/qa-ai.png') },
-];
+  { key: 'book', label: 'Book Appointment', img: require('@/assets/images/qa-book.png') },
+  { key: 'message', label: 'Message Clinic', img: require('@/assets/images/qa-message.png') },
+  { key: 'call', label: 'Video Consult', img: require('@/assets/images/qa-video.png') },
+  { key: 'ai', label: 'AI Assistant', img: require('@/assets/images/qa-ai.png') },
+] as const;
 
 function Row({ icon, text }: { icon: SymbolViewProps['name']; text: string }) {
   return (
@@ -58,12 +60,34 @@ const greeting = () => {
 export default function Home() {
   const { me } = useMe();
   const avatar = useAvatar();
+  // Ring list resolved once at the root — calling the clinic costs no round trip.
+  const { memberIds } = useClinic();
+  const ring = useRingCall();
+  const [calling, setCalling] = useState(false);
   // Across the whole family, soonest first — the API already ordered it.
   const { data, loading } = useApi<{ appointments: Appointment[] }>(
     me?.hasOnboarded ? '/api/appointments?scope=upcoming' : null
   );
 
   const next = data?.appointments[0];
+
+  const onAction = async (key: (typeof ACTIONS)[number]['key']) => {
+    if (key === 'book') return router.push('/booking/date');
+    if (key === 'ai') return router.push('/assistant');
+    if (key === 'message') return router.push('/messages');
+
+    setCalling(true);
+    try {
+      const started = await ring(memberIds);
+      if (!started) {
+        Alert.alert('Nobody to call yet', 'The clinic has not set up video consults on this account.');
+      }
+    } catch {
+      Alert.alert('Could not start the call', 'Please check your connection and try again.');
+    } finally {
+      setCalling(false);
+    }
+  };
 
   return (
     <View collapsable={false} style={{ flex: 1, backgroundColor: C.page }}>
@@ -119,15 +143,29 @@ export default function Home() {
                 <Row icon="person" text={next.dentist?.displayName ?? 'The clinic'} />
                 <Row icon="mouth" text={next.service?.name ?? 'Appointment'} />
               </View>
-              <Pressable
-                onPress={() => router.push(`/appointment/${next.id}`)}
-                className="ml-auto mt-[4px] h-[38px] items-center justify-center rounded-[19px] px-[26px]"
-                style={{ borderWidth: 1.5, borderColor: '#7FD3EE', backgroundColor: '#F2FBFE' }}
-              >
-                <Text className="text-[17px]" style={{ color: C.blue }}>
-                  View Details
-                </Text>
-              </Pressable>
+              <View className="ml-auto mt-[4px] flex-row items-center" style={{ gap: 10 }}>
+                {/* A7: the API decides when the join window is open. */}
+                {next.canJoin ? (
+                  <Pressable
+                    onPress={() => router.push(`/call/${next.streamCallId}`)}
+                    className="h-[38px] items-center justify-center rounded-[19px] px-[24px]"
+                    style={{ backgroundColor: C.accent }}
+                  >
+                    <Text className="text-[17px] font-semibold" style={{ color: '#FFFFFF' }}>
+                      Join
+                    </Text>
+                  </Pressable>
+                ) : null}
+                <Pressable
+                  onPress={() => router.push(`/appointment/${next.id}`)}
+                  className="h-[38px] items-center justify-center rounded-[19px] px-[26px]"
+                  style={{ borderWidth: 1.5, borderColor: '#7FD3EE', backgroundColor: '#F2FBFE' }}
+                >
+                  <Text className="text-[17px]" style={{ color: C.blue }}>
+                    View Details
+                  </Text>
+                </Pressable>
+              </View>
             </>
           ) : (
             <>
@@ -154,12 +192,14 @@ export default function Home() {
         <View className="mt-[14px] flex-row flex-wrap" style={{ gap: 12 }}>
           {ACTIONS.map((a) => (
             <Pressable
-              key={a.label}
-              onPress={() => ('href' in a && a.href ? router.push(a.href) : undefined)}
+              key={a.key}
+              onPress={() => onAction(a.key)}
+              disabled={a.key === 'call' && calling}
               className="items-center rounded-[24px] px-[12px] pb-[18px] pt-[20px]"
               style={[
                 { width: '48%', backgroundColor: C.card, borderWidth: 1, borderColor: C.border },
                 CARD_SHADOW,
+                a.key === 'call' && calling ? { opacity: 0.55 } : null,
               ]}
             >
               <View

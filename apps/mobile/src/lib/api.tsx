@@ -258,6 +258,8 @@ export type Appointment = {
   streamCallId: string | null;
   /** Decided server-side by the 24-hour rule — the client only hides the button. */
   canCancel: boolean;
+  /** Same deal for the teleconsult join window (PLAN.md A7). */
+  canJoin: boolean;
   /** "Fri, May 24, 2024" and "10:30 AM", already in clinic time. */
   dateLabel: string;
   timeLabel: string;

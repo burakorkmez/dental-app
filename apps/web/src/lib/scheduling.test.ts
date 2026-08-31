@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   availableSlots,
   canCancel,
+  canJoinCall,
   classifySlot,
   overlaps,
   type BusyInterval,
@@ -359,5 +360,22 @@ describe('classifySlot — the write-path guard', () => {
         now: new Date('2025-03-01T00:00:00Z'),
       })
     ).toBe('invalid');
+  });
+});
+
+describe('canJoinCall — the teleconsult join window (A7)', () => {
+  const startsAt = new Date('2025-06-10T14:00:00Z');
+  const at = (minutesFromStart: number) =>
+    new Date(startsAt.getTime() + minutesFromStart * 60_000);
+
+  it('is shut until 5 minutes before', () => {
+    expect(canJoinCall(startsAt, at(-6))).toBe(false);
+    expect(canJoinCall(startsAt, at(-5))).toBe(true);
+  });
+
+  it('stays open through the appointment and 30 minutes past the start', () => {
+    expect(canJoinCall(startsAt, at(0))).toBe(true);
+    expect(canJoinCall(startsAt, at(30))).toBe(true);
+    expect(canJoinCall(startsAt, at(31))).toBe(false);
   });
 });

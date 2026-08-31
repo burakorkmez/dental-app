@@ -24,12 +24,12 @@ rather than retrofitted.
 |---|---|
 | **Problem** | Booking is phone-only; intake is paper; aftercare is forgotten; minor questions require a drive to the office. |
 | **Primary user** | Patients of one local US dental practice. Open signup — anyone can join and book, so the app doubles as patient acquisition. |
-| **Secondary user** | Clinic staff and dentists, on a desktop web dashboard. |
+| **Secondary user** | Clinic staff and dentists — the desktop dashboard for the calendar and records, the mobile app for chat and calls (D14). |
 | **Must do well** | Book a real, confirmed appointment without calling. Everything else is supporting cast. |
 
 ### Surfaces
 
-- **`apps/mobile`** — Expo React Native. Patients only.
+- **`apps/mobile`** — Expo React Native. Patients, and staff for chat and calls (D14).
 - **`apps/web`** — Next.js. Staff/dentist dashboard **and** the API that mobile calls **and** webhook endpoints. One deploy, one schema.
 - **`packages/shared`** — Zod schemas + TS types for the API contract. Nothing else lives here.
 
@@ -51,7 +51,8 @@ rather than retrofitted.
 
 Payments and deposits. Insurance/ID card capture. Email and SMS channels. On-demand
 calling and support presence. AI photo analysis. Multi-clinic tenancy. Web app for
-patients. Staff features on mobile. Loyalty, referrals, gamification.
+patients. Loyalty, referrals, gamification. (Staff features on mobile *were* out of
+scope; chat and calling moved in — see D14. Everything else staff-facing is still web.)
 
 ### Core user journeys
 
@@ -350,16 +351,28 @@ lands before everything that depends on it.
 - Web dashboard: day and week views across dentists, click-through to the patient record
   (intake, medical history, visit timeline), manual block-out and cancel.
 
-### Phase 6 — Teleconsult
-- `POST /api/stream/token` issues user tokens server-side.
-- Call id `appointment-{id}`; join gated to the T-5min → T+30min window on the server.
-- Stream Video RN SDK in mobile, Stream Video React SDK on the dashboard.
-- **Requires an EAS dev build — do this before starting the phase, not during.**
+### Phase 6 — Teleconsult ✅ (foreground ringing; push needs credentials — see D16)
+- `POST /api/stream/token` issues user tokens server-side, deriving the Stream
+  user id from the Clerk session so a client can never name its own.
+- Call id `appointment-{id}` (D9); the T-5min → T+30min window is computed
+  server-side by `canJoinCall()` and shipped as `canJoin` on the appointment
+  payload, the same way `canCancel` already works (D15).
+- Stream Video RN SDK in mobile. Staff join from the **same** mobile app (D14),
+  so the dashboard's Stream Video React SDK left the v1 path.
+- On top of the scheduled teleconsult, either side can place a **ringing** call
+  from the conversation (D16). Rings deliver over the socket, so they reach an
+  app that is open. Waking a backgrounded app needs APNs VoIP + FCM
+  credentials — the runbook is `apps/mobile/RINGING-PUSH.md`.
+- **Requires an EAS dev build — Expo Go cannot load the WebRTC native module.**
 
-### Phase 7 — Chat
+### Phase 7 — Chat ✅ (attachments land on Stream's CDN, not ImageKit — D17)
 - Stream Chat, channel `patient-{id}`, members = the patient + the staff team.
-- Photo attachments upload to ImageKit's private folder via server-signed params; the
-  message carries a signed URL.
+  Created and member-synced server-side by `ensureClinicChannel()`, so a staff
+  member hired later is added to every existing conversation on next open.
+- Patients land straight in their one conversation; staff get the shared inbox
+  (`ChannelList`) and open a thread from it.
+- Photo attachments currently use Stream's own upload (D17). The ImageKit
+  private-folder path is still the target before real patient data.
 
 ### Phase 8 — AI assistant ✅ (thread persisted in `ai_conversations` / `ai_messages`)
 - `POST /api/ai/chat` — streams from `gpt-4o-mini`, persists to `ai_conversations` /
@@ -413,6 +426,11 @@ Recorded here because §4 above is now partly built and these differ from what i
 | D11 | **`service.key` rides along on appointment payloads**, not just on `/api/services`. | The mobile cards pick their artwork by key (D7). Matching on a display name would break the moment the clinic renames a service. |
 | D12 | **Onboarding posts once, from step 4** — not per step as §4 assumed. | `hasOnboarded` is defined as "a `is_self` patient row exists". Writing that at step 1 would mark onboarding done for someone who then drops out at step 2, and they would never be asked again. Resuming a drop-out needs a separate progress flag, which v1 does not have. |
 | D13 | **Preferred appointment time (onboarding step 4) is collected but not stored.** | No column, and no scheduling behaviour reads it yet. Adding one is a migration for a field nothing consumes. |
+| D14 | **Staff use the same mobile app, not the dashboard, for chat and calls.** Role comes from Clerk `publicMetadata` → `users.role` → `/api/me`; `(tabs)/_layout.tsx` hides Home and Appointments for staff and relabels Messages as Inbox. | Calls have to be mobile-to-mobile to be answered at all — a dentist is not sat at a desktop. It also means one Stream integration instead of two, and the dashboard keeps doing what it is good at (the calendar and patient records). |
+| D15 | **`canJoin` is computed server-side** by `canJoinCall()` in `scheduling.ts` and rides on the appointment payload. | Exactly the `canCancel` precedent: the window is a business rule, and a client that computes it owns a rule it should not. Note the ceiling flagged in the code — it gates the button, not the room. |
+| D16 | **Ringing calls, foreground only for now.** `getOrCreate({ ring: true })` with a fresh UUID per call; a root-level `useCalls()` watcher renders the incoming/outgoing UI over any screen. | Ringing over the socket needs no credentials and is fully demoable today. Push (APNs VoIP + FCM) is a credentials task, not a code task, and installing the Firebase plugins without those files breaks `expo prebuild`. Runbook: `apps/mobile/RINGING-PUSH.md`. |
+| D17 | **Chat photo attachments use Stream's upload, not ImageKit.** | Stream already holds the message body, and it is on the same BAA list, so routing the image elsewhere buys nothing in v1 while costing a custom upload handler. Revisit with the rest of the ImageKit work — the signed-URL requirement in §1 still stands for clinical photos. |
+| D18 | **The Stream API key is served by `POST /api/stream/token`, not `EXPO_PUBLIC_STREAM_API_KEY`.** | The app already has to call that endpoint for a token, so shipping the key in the bundle adds a second place to rotate it and nothing else. The var is gone from `apps/mobile/.env.example`. |
 
 
 ## 5. Verification

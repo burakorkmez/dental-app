@@ -22,6 +22,7 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
+      "edgeToEdgeEnabled": true,
       "package": "com.dentalapp.mobile"
     },
     "web": {
@@ -46,6 +47,37 @@
           "url": "https://sentry.io/",
           "organization": "codesistency-gs",
           "project": "dental-app-tutorial"
+        }
+      ],
+      "@stream-io/video-react-native-sdk",
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "$(PRODUCT_NAME) uses your camera so you can see your dentist during a video consultation.",
+          "microphonePermission": "$(PRODUCT_NAME) uses your microphone so your dentist can hear you during a consultation."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "$(PRODUCT_NAME) uses your photo library so you can send the clinic a photo of your teeth.",
+          "cameraPermission": "$(PRODUCT_NAME) uses your camera so you can send the clinic a photo of your teeth."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "$(PRODUCT_NAME) shows your recent photos so you can attach one to a message.",
+          "savePhotosPermission": "$(PRODUCT_NAME) saves photos the clinic sends you to your library.",
+          "isAccessMediaLocationEnabled": false
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 24
+          }
         }
       ]
     ],

@@ -1,6 +1,6 @@
 import { appointments } from '@/db/schema';
 
-import { canCancel } from './scheduling';
+import { canCancel, canJoinCall } from './scheduling';
 import { formatClinicDate, formatClinicTime } from './time';
 
 export type AppointmentRow = {
@@ -31,6 +31,13 @@ export function serialize(row: AppointmentRow) {
     isTeleconsult: row.service?.isTeleconsult ?? false,
     streamCallId: a.streamCallId,
     canCancel: a.status === 'booked' && canCancel(a.startsAt, new Date()),
+    // A7's join window, decided here for the same reason as `canCancel`: the
+    // app renders a button, it doesn't own the rule.
+    canJoin:
+      a.status === 'booked' &&
+      Boolean(row.service?.isTeleconsult) &&
+      Boolean(a.streamCallId) &&
+      canJoinCall(a.startsAt, new Date()),
     dateLabel: formatClinicDate(a.startsAt),
     timeLabel: formatClinicTime(a.startsAt),
     patient: row.patient,

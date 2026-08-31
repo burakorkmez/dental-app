@@ -5,8 +5,11 @@ import { tokenCache } from '@clerk/expo/token-cache';
 import * as Sentry from '@sentry/react-native';
 import { DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import { Pressable, Text, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { MeProvider, useMe } from '@/lib/api';
+import { StreamProvider } from '@/lib/stream';
 
 // No DSN (dev, or a checkout without one) leaves the SDK disabled.
 Sentry.init({
@@ -26,16 +29,24 @@ Sentry.init({
 // call preventAutoHideAsync.
 function RootLayout() {
   return (
-    <ClerkProvider
-      publishableKey={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!}
-      tokenCache={tokenCache}
-    >
-      <ThemeProvider value={DefaultTheme}>
-        <MeProvider>
-          <RootNavigator />
-        </MeProvider>
-      </ThemeProvider>
-    </ClerkProvider>
+    // GestureHandlerRootView is required by Stream Chat's overlays, and
+    // SafeAreaProvider feeds the insets the call UI pads itself with.
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <ClerkProvider
+          publishableKey={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!}
+          tokenCache={tokenCache}
+        >
+          <ThemeProvider value={DefaultTheme}>
+            <MeProvider>
+              <StreamProvider>
+                <RootNavigator />
+              </StreamProvider>
+            </MeProvider>
+          </ThemeProvider>
+        </ClerkProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
@@ -65,6 +76,8 @@ function RootNavigator() {
         <Stack.Screen name="appointment/[id]" />
         <Stack.Screen name="assistant" />
         <Stack.Screen name="onboarding" />
+        <Stack.Screen name="channel/[id]" />
+        <Stack.Screen name="call/[id]" />
       </Stack.Protected>
     </Stack>
   );

@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, Text, View } from 'react-native';
@@ -128,6 +128,23 @@ export default function AppointmentDetail() {
                   </Card>
                 ))}
               </>
+            ) : null}
+
+            {a.canJoin ? (
+              <View className="mt-[28px]">
+                <Button
+                  label="Join Video Consultation"
+                  arrow="video.fill"
+                  onPress={() => router.push(`/call/${a.streamCallId}`)}
+                />
+              </View>
+            ) : a.isTeleconsult && a.status === 'booked' ? (
+              <Text
+                className="mt-[24px] text-center text-[13px]"
+                style={{ color: PAGE.sub, lineHeight: 19 }}
+              >
+                {'The join button opens 5 minutes before your consultation.'}
+              </Text>
             ) : null}
 
             {a.canCancel ? (
