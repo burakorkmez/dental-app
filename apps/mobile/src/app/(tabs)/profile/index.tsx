@@ -4,11 +4,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router, type Href } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
-import { Fragment, type ReactNode } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Fragment, useState, type ReactNode } from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
 
 import { AQUA_BODY, useAvatar } from '@/components/ui';
-import { useMe } from '@/lib/api';
+import { useApiClient, useMe } from '@/lib/api';
 
 const C = {
   page: '#EEF5FA',
@@ -72,7 +72,49 @@ export default function Profile() {
   const { me } = useMe();
   const avatar = useAvatar();
   const { signOut } = useAuth();
+  const call = useApiClient();
+  const [deleting, setDeleting] = useState(false);
   const self = me?.self;
+
+  /**
+   * Deletion is irreversible and takes the family's records with it, so it asks
+   * twice: once for intent, once to confirm what actually goes.
+   *
+   * Sign-out comes AFTER the request, not before — the call needs the session
+   * token, and by the time it returns the Clerk user is gone and the session is
+   * already void. `signOut()` is what clears it from the device.
+   */
+  const onDelete = () => {
+    if (deleting) return;
+    Alert.alert(
+      'Delete account?',
+      self
+        ? `This permanently deletes your profile, medical history, appointments and messages${
+            (me?.family.length ?? 0) > 1 ? ', along with every family member on this account' : ''
+          }. It cannot be undone.`
+        : 'This permanently deletes your account. It cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setDeleting(true);
+            try {
+              await call('/api/me', { method: 'DELETE' });
+              await signOut();
+            } catch (err) {
+              setDeleting(false);
+              Alert.alert(
+                'Could not delete your account',
+                err instanceof Error ? err.message : 'Please try again.'
+              );
+            }
+          },
+        },
+      ]
+    );
+  };
 
   return (
     <View collapsable={false} style={{ flex: 1, backgroundColor: C.page }}>
@@ -178,19 +220,31 @@ export default function Profile() {
 
         {/* delete */}
         <Pressable
+          onPress={onDelete}
+          disabled={deleting}
           className="mt-[16px] h-[57px] flex-row items-center rounded-[22px] px-[22px]"
-          style={{ backgroundColor: C.redCard, borderWidth: 1, borderColor: C.redBorder }}
+          style={{
+            backgroundColor: C.redCard,
+            borderWidth: 1,
+            borderColor: C.redBorder,
+            opacity: deleting ? 0.6 : 1,
+          }}
         >
           {icon('trash', C.red)}
           <Text className="ml-[15px] flex-1 text-[15.5px]" style={{ color: C.red }}>
-            Delete Account
+            {deleting ? 'Deleting account…' : 'Delete Account'}
           </Text>
-          <SymbolView name="chevron.right" size={19} weight="medium" tintColor={C.red} />
+          {deleting ? (
+            <ActivityIndicator size="small" color={C.red} />
+          ) : (
+            <SymbolView name="chevron.right" size={19} weight="medium" tintColor={C.red} />
+          )}
         </Pressable>
 
         {/* sign out */}
         <Pressable
           onPress={() => signOut()}
+          disabled={deleting}
           className="mt-[20px] flex-row items-center justify-center"
         >
           <SymbolView

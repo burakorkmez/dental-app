@@ -66,6 +66,20 @@ export const HeartPulseIcon = (p: SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+export const ChatIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M20 14.5a3 3 0 0 1-3 3H9l-4 3v-3H7a3 3 0 0 1-3-3v-7a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3Z" />
+    <path d="M9 9h6M9 12.5h4" />
+  </svg>
+);
+
+export const SparkleIcon = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M12 3.5 13.7 9 19 10.7 13.7 12.4 12 17.9 10.3 12.4 5 10.7 10.3 9 12 3.5Z" />
+    <path d="M18 16.5 18.7 18.8 21 19.5 18.7 20.2 18 22.5 17.3 20.2 15 19.5 17.3 18.8 18 16.5Z" />
+  </svg>
+);
+
 export const ChevronLeftIcon = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}>
     <path d="m14 6-6 6 6 6" />

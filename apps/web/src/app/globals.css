@@ -67,3 +67,97 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.85),
     0 5px 12px rgba(10, 91, 150, 0.17);
 }
+
+/**
+ * Legal pages are long-form semantic HTML — the ToS and the Privacy Policy.
+ * Styling them once here, by descendant selector, is far less code than
+ * wrapping every heading and paragraph in a component, and it means the page
+ * files stay readable as documents.
+ */
+@utility legal-prose {
+  color: var(--color-navy);
+  font-size: 15.5px;
+  line-height: 1.72;
+
+  & h2 {
+    margin-top: 44px;
+    margin-bottom: 12px;
+    font-size: 21px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    scroll-margin-top: 96px;
+  }
+
+  & h3 {
+    margin-top: 28px;
+    margin-bottom: 8px;
+    font-size: 16.5px;
+    font-weight: 650;
+  }
+
+  & p {
+    margin-bottom: 14px;
+  }
+
+  & ul {
+    margin-bottom: 16px;
+    padding-left: 4px;
+    list-style: none;
+  }
+
+  & li {
+    position: relative;
+    margin-bottom: 8px;
+    padding-left: 20px;
+  }
+
+  /* Aqua bullet rather than a disc — matches the tile accents elsewhere. */
+  & li::before {
+    content: '';
+    position: absolute;
+    top: 10px;
+    left: 2px;
+    height: 6px;
+    width: 6px;
+    border-radius: 999px;
+    background-color: var(--color-aqua);
+  }
+
+  & strong {
+    font-weight: 650;
+  }
+
+  & a {
+    color: var(--color-aqua-ink);
+    font-weight: 550;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  & table {
+    width: 100%;
+    margin-bottom: 20px;
+    border-collapse: collapse;
+    font-size: 14.5px;
+  }
+
+  & th {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--color-hairline);
+    text-align: left;
+    font-weight: 650;
+    color: var(--color-muted);
+  }
+
+  & td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--color-hairline);
+    vertical-align: top;
+  }
+
+  & hr {
+    margin: 40px 0;
+    border: 0;
+    border-top: 1px solid var(--color-hairline);
+  }
+}

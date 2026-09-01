@@ -3,6 +3,7 @@ import * as AuthSession from 'expo-auth-session';
 import { Image } from 'expo-image';
 import { StatusBar } from 'expo-status-bar';
 import { SymbolView } from 'expo-symbols';
+import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -28,6 +29,27 @@ const SHADOW = {
 } as const;
 
 type Strategy = 'oauth_apple' | 'oauth_google';
+
+/**
+ * The Terms and Privacy Policy are pages on the web app (apps/web), so there is
+ * one canonical text rather than a copy bundled into the binary that goes stale
+ * on the next legal review. Opened in an in-app browser: leaving the app to
+ * Safari mid-signup is where people drop out.
+ */
+const legalUrl = (path: '/terms' | '/privacy') =>
+  `${process.env.EXPO_PUBLIC_API_URL ?? ''}${path}`;
+
+function LegalLink({ path, children }: { path: '/terms' | '/privacy'; children: string }) {
+  return (
+    <Text
+      className="font-semibold"
+      style={{ color: C.link }}
+      onPress={() => WebBrowser.openBrowserAsync(legalUrl(path))}
+    >
+      {children}
+    </Text>
+  );
+}
 
 export default function AuthScreen() {
   const insets = useSafeAreaInsets();
@@ -131,13 +153,8 @@ export default function AuthScreen() {
           </Text>
         </View>
         <Text className="mt-[6px] text-center text-[12.5px]" style={{ color: C.footer }}>
-          <Text className="font-semibold" style={{ color: C.link }}>
-            Privacy Policy
-          </Text>{' '}
-          and{' '}
-          <Text className="font-semibold" style={{ color: C.link }}>
-            Terms of Use
-          </Text>
+          <LegalLink path="/privacy">Privacy Policy</LegalLink> and{' '}
+          <LegalLink path="/terms">Terms of Service</LegalLink>
         </Text>
       </View>
     </View>
