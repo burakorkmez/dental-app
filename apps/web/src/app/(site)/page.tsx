@@ -304,7 +304,7 @@ export default function Landing() {
             <Showcase
               src={signin}
               alt="The Dentify sign-in screen"
-              className="mx-auto max-w-[280px] lg:max-w-[330px]"
+              className="mx-auto w-full max-w-[280px] lg:max-w-[300px]"
             />
           </div>
         </div>

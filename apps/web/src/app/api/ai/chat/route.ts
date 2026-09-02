@@ -26,13 +26,12 @@ import { aiChatSchema } from '@/lib/validation';
  * free text, so they may still carry identifiers; see lib/ai.ts. The outbound
  * call is gated on an explicit deployment approval and fails closed.
  *
- * That same free text also goes to Sentry, as the input/output of the gen_ai
- * span — that is what Sentry's Conversations view replays. It is the identical
- * bet the mobile app makes with unmasked session replay, and it holds only
- * while PLAN.md A15 does (seeded fake patients). Before a real patient signs
- * in, set `dataCollection: { genAI: { inputs: false, outputs: false } }` in
- * sentry.server.config.ts; tokens, cost, latency and errors all survive that,
- * only the replayed chat goes away.
+ * That same free text does NOT go to Sentry: `genAI: { inputs: false, outputs:
+ * false }` in sentry.server.config.ts keeps the prompt and the reply off the
+ * gen_ai span, so Conversations lists the thread and its turns but replays no
+ * message content. Tokens, cost, latency, model and errors all survive that.
+ * Flip the two flags to true only if PLAN.md A15 (seeded fake patients) is
+ * still what is running — a real patient's symptoms are PHI.
  */
 export const POST = route(async (req: Request) => {
   const user = await requireAuth();
@@ -97,9 +96,8 @@ export const POST = route(async (req: Request) => {
     // OpenAI, and a blank turn in the prompt is worse than no turn at all.
   ).filter((m) => m.content.trim());
 
-  // The wrapper is what produces the gen_ai span — model, tokens, cost,
-  // latency, and (because `dataCollection` is set in sentry.server.config.ts)
-  // the prompt and the reply.
+  // The wrapper is what produces the gen_ai span — model, tokens, cost and
+  // latency. Not the prompt or the reply; see the PHI note at the top.
   //
   // ponytail: `openai@7` is past the range Sentry documents as supported
   // (>=4 <7); the wrapper only touches `chat.completions.create`, which has

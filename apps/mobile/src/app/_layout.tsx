@@ -135,6 +135,7 @@ function RootNavigator() {
       */}
       <Stack.Protected guard={isSignedIn && __DEV__}>
         <Stack.Screen name="sentry-test" />
+        <Stack.Screen name="sentry-logs" />
       </Stack.Protected>
     </Stack>
   );

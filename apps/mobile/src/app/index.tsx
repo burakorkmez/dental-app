@@ -83,9 +83,14 @@ export default function AuthScreen() {
         contentFit="cover"
       />
 
+      {/* The card sizes to its content and sits at the bottom rather than being
+          pinned to a percentage of the screen: the copy inside is fixed-size, so
+          a percentage that fits a 17 Pro Max overflows a 16/17 Pro. */}
+      <View className="flex-1" />
+
       <View
-        className="absolute inset-x-[7px] rounded-[32px] px-[34px]"
-        style={{ backgroundColor: C.card, top: '48%', bottom: 9, paddingBottom: insets.bottom }}
+        className="mx-[7px] mb-[9px] rounded-[32px] px-[34px]"
+        style={{ backgroundColor: C.card, paddingBottom: insets.bottom }}
       >
         <Text
           className="mt-[35px] text-center text-[35px] font-bold"
@@ -97,6 +102,8 @@ export default function AuthScreen() {
         <Text
           className="mt-[13px] text-center text-[30px] font-bold"
           style={{ color: C.headline, lineHeight: 43 }}
+          numberOfLines={2}
+          adjustsFontSizeToFit
         >
           Care for your smile,{'\n'}without the phone call
         </Text>
@@ -106,41 +113,40 @@ export default function AuthScreen() {
         </Text>
 
         <Pressable
-          className="mt-[34px] h-[56px] flex-row items-center rounded-full bg-black pl-[110px]"
+          className="mt-[34px] h-[56px] flex-row items-center justify-center gap-[16px] rounded-full bg-black"
           style={[SHADOW, busy ? { opacity: 0.6 } : null]}
           disabled={busy !== null}
           onPress={() => signInWith('oauth_apple')}
         >
-          {busy === 'oauth_apple' ? (
-            <ActivityIndicator color="#FFFFFF" style={{ position: 'absolute', left: 49 }} />
-          ) : (
-            <SymbolView
-              name="apple.logo"
-              size={25}
-              tintColor="#FFFFFF"
-              style={{ position: 'absolute', left: 49 }}
-            />
-          )}
+          <View className="w-[29px] items-center">
+            {busy === 'oauth_apple' ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <SymbolView name="apple.logo" size={25} tintColor="#FFFFFF" />
+            )}
+          </View>
           <Text className="text-[18.5px] font-semibold text-white">
             Continue with Apple
           </Text>
         </Pressable>
 
         <Pressable
-          className="mt-[20px] h-[56px] flex-row items-center rounded-full bg-white pl-[110px]"
+          className="mt-[20px] h-[56px] flex-row items-center justify-center gap-[16px] rounded-full bg-white"
           style={[SHADOW, busy ? { opacity: 0.6 } : null]}
           disabled={busy !== null}
           onPress={() => signInWith('oauth_google')}
         >
-          {busy === 'oauth_google' ? (
-            <ActivityIndicator color="#10253D" style={{ position: 'absolute', left: 46 }} />
-          ) : (
-            <Image
-              source={require('@/assets/images/google-logo.png')}
-              style={{ position: 'absolute', left: 46, width: 29, height: 29 }}
-              contentFit="contain"
-            />
-          )}
+          <View className="w-[29px] items-center">
+            {busy === 'oauth_google' ? (
+              <ActivityIndicator color="#10253D" />
+            ) : (
+              <Image
+                source={require('@/assets/images/google-logo.png')}
+                style={{ width: 29, height: 29 }}
+                contentFit="contain"
+              />
+            )}
+          </View>
           <Text className="text-[18.5px] font-semibold" style={{ color: '#10253D' }}>
             Continue with Google
           </Text>
